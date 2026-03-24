@@ -11,51 +11,14 @@
 #include "hardware/clocks.h"
 #include "hardware/irq.h"
 
-// Globals expected by the driver - placed in scratch memory for fast ISR access
+// Globals expected by the driver
 int graphics_buffer_width = 320;
 int graphics_buffer_height = 240;
 int graphics_buffer_shift_x = 0;
 int graphics_buffer_shift_y = 0;
 enum graphics_mode_t hdmi_graphics_mode = GRAPHICSMODE_DEFAULT;
 
-// Graphics buffer pointer in scratch memory for fast DMA handler access
-static uint8_t * __scratch_y("hdmi_ptr") graphics_buffer = NULL;
-
-// CRT scanline effect: when active, every other display line is black
-static bool __scratch_y("hdmi_crt") crt_active = false;
-
-void graphics_set_crt_active(bool active) {
-    crt_active = active;
-}
-
-bool graphics_get_crt_active(void) {
-    return crt_active;
-}
-
-// Black & white mode: when active, palette colors are converted to greyscale
-void graphics_convert_all_palette(void);  // Forward declaration
-static bool __scratch_y("hdmi_bw") greyscale_active = false;
-
-void graphics_set_greyscale(bool active) {
-    if (greyscale_active == active) return;
-    greyscale_active = active;
-    // Reconvert entire palette with new greyscale setting
-    graphics_convert_all_palette();
-}
-
-bool graphics_get_greyscale(void) {
-    return greyscale_active;
-}
-
-// Convert RGB888 to greyscale using luminance formula (fast integer approx)
-// Y = (R*77 + G*150 + B*29) >> 8
-static inline uint32_t rgb_to_grey(uint32_t color888) {
-    uint8_t R = (color888 >> 16) & 0xff;
-    uint8_t G = (color888 >> 8) & 0xff;
-    uint8_t B = color888 & 0xff;
-    uint8_t Y = (uint8_t)((R * 77 + G * 150 + B * 29) >> 8);
-    return (Y << 16) | (Y << 8) | Y;
-}
+static uint8_t *graphics_buffer = NULL;
 
 void graphics_set_buffer(uint8_t *buffer) {
     graphics_buffer = buffer;
@@ -123,60 +86,8 @@ static int SM_conv = -1;
 //буфер  палитры 256 цветов в формате R8G8B8
 static uint32_t palette[256];
 
-// Substitute map for HDMI reserved sync-control indices (BASE_HDMI_CTRL_INX..BASE_HDMI_CTRL_INX+3)
-static uint8_t hdmi_color_substitute[4] = {0, 0, 0, 0};
-
-// Assembly-optimized functions
-extern void hdmi_copy_scanline_asm(uint8_t* dst, const uint8_t* src, uint32_t count, const uint8_t* subst);
-extern void hdmi_memset_fast(uint8_t* dst, uint8_t val, uint32_t count);
-extern uint64_t get_ser_diff_data_asm(uint16_t dataR, uint16_t dataG, uint16_t dataB);
-
-/* TMDS encoding lookup table - 256 entries (precomputed) */
-static const uint16_t tmds_table[256] = {
-    0x100, 0x1ff, 0x1fe, 0x101, 0x1fc, 0x103, 0x102, 0x1fd,
-    0x1f8, 0x107, 0x106, 0x1f9, 0x104, 0x1fb, 0x1fa, 0x105,
-    0x1f0, 0x10f, 0x10e, 0x1f1, 0x10c, 0x1f3, 0x1f2, 0x10d,
-    0x108, 0x1f7, 0x1f6, 0x109, 0x1f4, 0x10b, 0x2a0, 0x25f,
-    0x1e0, 0x11f, 0x11e, 0x1e1, 0x11c, 0x1e3, 0x1e2, 0x11d,
-    0x118, 0x1e7, 0x1e6, 0x119, 0x1e4, 0x11b, 0x2b0, 0x24f,
-    0x110, 0x1ef, 0x1ee, 0x111, 0x1ec, 0x113, 0x2b8, 0x247,
-    0x1e8, 0x117, 0x2bc, 0x243, 0x2be, 0x241, 0x240, 0x2bf,
-    0x1c0, 0x13f, 0x13e, 0x1c1, 0x13c, 0x1c3, 0x1c2, 0x13d,
-    0x138, 0x1c7, 0x1c6, 0x139, 0x1c4, 0x13b, 0x290, 0x26f,
-    0x130, 0x1cf, 0x1ce, 0x131, 0x1cc, 0x133, 0x298, 0x267,
-    0x1c8, 0x137, 0x29c, 0x263, 0x29e, 0x261, 0x260, 0x29f,
-    0x120, 0x1df, 0x1de, 0x121, 0x1dc, 0x123, 0x288, 0x277,
-    0x1d8, 0x127, 0x28c, 0x273, 0x28e, 0x271, 0x270, 0x28f,
-    0x1d0, 0x12f, 0x284, 0x27b, 0x286, 0x279, 0x278, 0x287,
-    0x282, 0x27d, 0x27c, 0x283, 0x27e, 0x281, 0x280, 0x27f,
-    0x180, 0x17f, 0x17e, 0x181, 0x17c, 0x183, 0x182, 0x17d,
-    0x178, 0x187, 0x186, 0x179, 0x184, 0x17b, 0x2d0, 0x22f,
-    0x170, 0x18f, 0x18e, 0x171, 0x18c, 0x173, 0x2d8, 0x227,
-    0x188, 0x177, 0x2dc, 0x223, 0x2de, 0x221, 0x220, 0x2df,
-    0x160, 0x19f, 0x19e, 0x161, 0x19c, 0x163, 0x2c8, 0x237,
-    0x198, 0x167, 0x2cc, 0x233, 0x2ce, 0x231, 0x230, 0x2cf,
-    0x190, 0x16f, 0x2c4, 0x23b, 0x2c6, 0x239, 0x238, 0x2c7,
-    0x2c2, 0x23d, 0x23c, 0x2c3, 0x23e, 0x2c1, 0x2c0, 0x23f,
-    0x140, 0x1bf, 0x1be, 0x141, 0x1bc, 0x143, 0x2e8, 0x217,
-    0x1b8, 0x147, 0x2ec, 0x213, 0x2ee, 0x211, 0x210, 0x2ef,
-    0x1b0, 0x14f, 0x2e4, 0x21b, 0x2e6, 0x219, 0x218, 0x2e7,
-    0x2e2, 0x21d, 0x21c, 0x2e3, 0x21e, 0x2e1, 0x2e0, 0x21f,
-    0x1a0, 0x15f, 0x2f4, 0x20b, 0x2f6, 0x209, 0x208, 0x2f7,
-    0x2f2, 0x20d, 0x20c, 0x2f3, 0x20e, 0x2f1, 0x2f0, 0x20f,
-    0x2fa, 0x205, 0x204, 0x2fb, 0x206, 0x2f9, 0x2f8, 0x207,
-    0x202, 0x2fd, 0x2fc, 0x203, 0x2fe, 0x201, 0x200, 0x2ff,
-};
-
-// Inline TMDS encoder using lookup table
-#define tmds_encode(d8) tmds_table[(uint8_t)(d8)]
-
-// Palette update flag - set by emulator, checked during vblank
-static volatile bool palette_dirty = false;
-static volatile bool full_palette_update_pending = false;  // Request full re-conversion
-static void apply_pending_palette(void);  // Forward declaration
-void graphics_convert_all_palette(void);  // Convert all palette to TMDS
-
-// HDMI sync control indices start at 251
+// Color substitution map for HDMI reserved indices 240-243
+static uint8_t color_substitute[4] = {239, 239, 239, 239};
 
 
 #define SCREEN_WIDTH (320)
@@ -194,10 +105,10 @@ static int dma_chan;
 static int dma_chan_pal_conv_ctrl;
 static int dma_chan_pal_conv;
 
-//DMA буферы - placed in scratch memory for fast ISR access
+//DMA буферы
 //основные строчные данные
-static uint32_t * __scratch_y("hdmi_ptr_3") dma_lines[2] = { NULL,NULL };
-static uint32_t * __scratch_y("hdmi_ptr_4") DMA_BUF_ADDR[2];
+static uint32_t* dma_lines[2] = { NULL,NULL };
+static uint32_t* DMA_BUF_ADDR[2];
 
 //ДМА палитра для конвертации
 //в хвосте этой памяти выделяется dma_data
@@ -206,44 +117,10 @@ alignas(4096) uint32_t conv_color[1224];
 //индекс, проверяющий зависание
 static uint32_t irq_inx = 0;
 
-// External screen buffer and double-buffer index from main.c
-extern uint8_t SCREEN[2][256 * 224];
-extern volatile uint32_t current_buffer;
-
 //функции и константы HDMI
 
-#define BASE_HDMI_CTRL_INX (251)
+#define BASE_HDMI_CTRL_INX (240)
 //программа конвертации адреса
-
-static inline uint32_t rgb_dist2(uint32_t a, uint32_t b) {
-    int dr = (int)((a >> 16) & 0xff) - (int)((b >> 16) & 0xff);
-    int dg = (int)((a >> 8) & 0xff) - (int)((b >> 8) & 0xff);
-    int db = (int)(a & 0xff) - (int)(b & 0xff);
-    return (uint32_t)(dr * dr + dg * dg + db * db);
-}
-
-static void hdmi_recompute_color_substitute(void) {
-    const int base = BASE_HDMI_CTRL_INX;
-    for (int i = 0; i < 4; i++) {
-        const uint8_t reserved = (uint8_t)(base + i);
-        const uint32_t target = palette[reserved] & 0x00ffffff;
-
-        uint8_t best = 0;
-        uint32_t best_d = 0xffffffffu;
-        for (int j = 0; j < 256; j++) {
-            if (j >= base && j <= base + 3) continue; // don't map to sync-control indices
-            const uint32_t cand = palette[j] & 0x00ffffff;
-            const uint32_t d = rgb_dist2(target, cand);
-            if (d < best_d) {
-                best_d = d;
-                best = (uint8_t)j;
-                if (d == 0) break;
-            }
-        }
-
-        hdmi_color_substitute[i] = best;
-    }
-}
 
 uint16_t pio_program_instructions_conv_HDMI[] = {
     //         //     .wrap_target
@@ -348,83 +225,102 @@ static void pio_set_x(PIO pio, const int sm, uint32_t v) {
     pio_sm_exec(pio, sm, instr_mov);
 }
 
-static void __scratch_y("hdmi_driver") dma_handler_HDMI() {
+static void dma_handler_HDMI() {
     static uint32_t inx_buf_dma;
     static uint line = 0;
+    struct video_mode_t mode = graphics_get_video_mode(get_video_mode());
     irq_inx++;
 
     dma_hw->ints0 = 1u << dma_chan_ctrl;
     dma_channel_set_read_addr(dma_chan_ctrl, &DMA_BUF_ADDR[inx_buf_dma & 1], false);
 
-    // Increment line counter with wrap at 524 (same as pico-snes-master)
-    line = line >= 524 ? 0 : line + 1;
-
-    // CRT scanline effect: on even lines in the content area, fill a black
-    // scanline buffer instead of skipping.  This produces alternating
-    // content / black output lines (classic CRT look).
-    #define VMARGIN_SCANLINES 16
-    #define CONTENT_SCANLINES (224*2)
-    if ((line & 1) == 0) {
-        if (crt_active) {
-            int sl = (int)line - VMARGIN_SCANLINES;
-            if (sl >= 0 && sl < CONTENT_SCANLINES) {
-                inx_buf_dma++;
-                uint8_t* activ_buf = (uint8_t *)dma_lines[inx_buf_dma & 1];
-                hdmi_memset_fast(activ_buf + 72, 0, 320);
-                hdmi_memset_fast(activ_buf + 48, BASE_HDMI_CTRL_INX, 24);
-                hdmi_memset_fast(activ_buf, BASE_HDMI_CTRL_INX + 1, 48);
-                hdmi_memset_fast(activ_buf + 392, BASE_HDMI_CTRL_INX, 8);
-            }
-        }
-        return;
+    if (line >= mode.h_total ) {
+        line = 0;
+        vsync_handler();
+    } else {
+        ++line;
     }
+
+    if ((line & 1) == 0) return;
     inx_buf_dma++;
 
     uint8_t* activ_buf = (uint8_t *)dma_lines[inx_buf_dma & 1];
 
-    // 224 SNES lines centered in 240 active lines: 16 blank scanlines top, 448 content, 16 blank bottom
-    if (line < (VMARGIN_SCANLINES + CONTENT_SCANLINES + VMARGIN_SCANLINES) ) {
-        // Active video region
-        uint8_t* output_buffer = activ_buf + 72; // Align sync
+    if (line < mode.h_width ) {
+        uint8_t* output_buffer = activ_buf + 72; //для выравнивания синхры;
+        int y = line >> 1;
+        //область изображения
+        uint8_t* input_buffer = get_line_buffer(y);
+        if (!input_buffer) return;
+        switch (hdmi_graphics_mode) {
+            case GRAPHICSMODE_DEFAULT:
+                //заполняем пространство сверху и снизу графического буфера
+                if (false || (graphics_buffer_shift_y > y) || (y >= (graphics_buffer_shift_y + graphics_buffer_height))
+                    || (graphics_buffer_shift_x >= SCREEN_WIDTH) || (
+                        (graphics_buffer_shift_x + graphics_buffer_width) < 0)) {
+                    memset(output_buffer, 255, SCREEN_WIDTH);
+                    break;
+                }
 
-        // Fill left margin (32 pixels for centering 256 in 320)
-        hdmi_memset_fast(output_buffer, 0, 32);
-        output_buffer += 32;
+                uint8_t* activ_buf_end = output_buffer + SCREEN_WIDTH;
+            //рисуем пространство слева от буфера
+                for (int i = graphics_buffer_shift_x; i-- > 0;) {
+                    *output_buffer++ = 255;
+                }
 
-        int snes_scanline = (int)line - VMARGIN_SCANLINES;
-        if (snes_scanline >= 0 && snes_scanline < CONTENT_SCANLINES) {
-            // Read from the front buffer (not currently being drawn to)
-            const uint8_t* input = &SCREEN[!current_buffer][(snes_scanline / 2) * graphics_buffer_width];
-
-            // Copy pixels using optimized assembly routine
-            hdmi_copy_scanline_asm(output_buffer, input, graphics_buffer_width, hdmi_color_substitute);
-        } else {
-            // Top/bottom margin: black
-            hdmi_memset_fast(output_buffer, 0, graphics_buffer_width);
+            //рисуем сам видеобуфер+пространство справа
+///                input_buffer = &graphics_buffer[(y - graphics_buffer_shift_y) * graphics_buffer_width];
+                const uint8_t* input_buffer_end = input_buffer + graphics_buffer_width;
+                if (graphics_buffer_shift_x < 0) input_buffer -= graphics_buffer_shift_x;
+                register size_t x = 0;
+                while (activ_buf_end > output_buffer) {
+                    if (input_buffer < input_buffer_end) {
+                        register uint8_t c = input_buffer[x++];
+                        // Substitute HDMI reserved colors with nearest matches
+                        if (c >= 240 && c <= 243) c = color_substitute[c - 240];
+                        *output_buffer++ = c;
+                    }
+                    else
+                        *output_buffer++ = 255;
+                }
+                break;
+            default:
+                for (int i = SCREEN_WIDTH; i--;) {
+                    uint8_t i_color = *input_buffer++;
+                    // Substitute HDMI reserved colors with nearest matches
+                    if (i_color >= 240 && i_color <= 243) i_color = color_substitute[i_color - 240];
+                    *output_buffer++ = i_color;
+                }
+                break;
         }
-        output_buffer += graphics_buffer_width;
 
-        // Fill right margin
-        hdmi_memset_fast(output_buffer, 0, 32);
 
-        // Sync pulses
-        hdmi_memset_fast(activ_buf + 48, BASE_HDMI_CTRL_INX, 24);
-        hdmi_memset_fast(activ_buf, BASE_HDMI_CTRL_INX + 1, 48);
-        hdmi_memset_fast(activ_buf + 392, BASE_HDMI_CTRL_INX, 8);
+        // memset(activ_buf,2,320);//test
+
+        //ССИ
+        //для выравнивания синхры
+
+        // --|_|---|_|---|_|----
+        //---|___________|-----
+        memset(activ_buf + 48,BASE_HDMI_CTRL_INX, 24);
+        memset(activ_buf,BASE_HDMI_CTRL_INX + 1, 48);
+        memset(activ_buf + 392,BASE_HDMI_CTRL_INX, 8);
+
+        //без выравнивания
+        // --|_|---|_|---|_|----
+        //------|___________|----
+        //   memset(activ_buf+320,BASE_HDMI_CTRL_INX,8);
+        //   memset(activ_buf+328,BASE_HDMI_CTRL_INX+1,48);
+        //   memset(activ_buf+376,BASE_HDMI_CTRL_INX,24);
     }
     else {
-        // VBlank area - apply pending palette at start of vblank
-        if (line == (VMARGIN_SCANLINES + CONTENT_SCANLINES + VMARGIN_SCANLINES + 1)) {
-            apply_pending_palette();
-        }
-        
         if ((line >= 490) && (line < 492)) {
             //кадровый синхроимпульс
             //для выравнивания синхры
             // --|_|---|_|---|_|----
             //---|___________|-----
-            hdmi_memset_fast(activ_buf + 48, BASE_HDMI_CTRL_INX + 2, 352);
-            hdmi_memset_fast(activ_buf, BASE_HDMI_CTRL_INX + 3, 48);
+            memset(activ_buf + 48,BASE_HDMI_CTRL_INX + 2, 352);
+            memset(activ_buf,BASE_HDMI_CTRL_INX + 3, 48);
             //без выравнивания
             // --|_|---|_|---|_|----
             //-------|___________|----
@@ -437,8 +333,8 @@ static void __scratch_y("hdmi_driver") dma_handler_HDMI() {
             //ССИ без изображения
             //для выравнивания синхры
 
-            hdmi_memset_fast(activ_buf + 48, BASE_HDMI_CTRL_INX, 352);
-            hdmi_memset_fast(activ_buf, BASE_HDMI_CTRL_INX + 1, 48);
+            memset(activ_buf + 48,BASE_HDMI_CTRL_INX, 352);
+            memset(activ_buf,BASE_HDMI_CTRL_INX + 1, 48);
 
             // memset(activ_buf,BASE_HDMI_CTRL_INX,328);
             // memset(activ_buf+328,BASE_HDMI_CTRL_INX+1,48);
@@ -459,7 +355,7 @@ static inline void irq_remove_handler_DMA_core1() {
 
 static inline void irq_set_exclusive_handler_DMA_core1() {
     irq_set_exclusive_handler(VIDEO_DMA_IRQ, dma_handler_HDMI);
-    irq_set_priority(VIDEO_DMA_IRQ, 0);  // Highest priority for HDMI
+    irq_set_priority(VIDEO_DMA_IRQ, 0);
     irq_set_enabled(VIDEO_DMA_IRQ, true);
 }
 
@@ -506,10 +402,11 @@ static inline bool hdmi_init() {
     offs_prg0 = pio_add_program(PIO_VIDEO, &program_PIO_HDMI);
     pio_set_x(PIO_VIDEO_ADDR, SM_conv, ((uint32_t)conv_color >> 12));
 
-    // Initialize palette conversion (skip HDMI sync-control indices, but initialize all others)
-    for (int ci = 0; ci < BASE_HDMI_CTRL_INX; ci++) graphics_set_palette_hdmi(ci, palette[ci]);
-    for (int ci = BASE_HDMI_CTRL_INX + 4; ci < 256; ci++) {
-        if (palette[ci] == 0) palette[ci] = 0x000000;
+    //заполнение палитры (skip only sync control 240-243, but initialize 244-254)
+    for (int ci = 0; ci < 240; ci++) graphics_set_palette_hdmi(ci, palette[ci]);
+    // Initialize 244-254 to black initially (will be updated when Doom sets palette)
+    for (int ci = 244; ci < 256; ci++) {
+        if (palette[ci] == 0) palette[ci] = 0x000000; // Ensure initialized
         graphics_set_palette_hdmi(ci, palette[ci]);
     }
 
@@ -700,68 +597,44 @@ static inline bool hdmi_init() {
 };
 
 void graphics_set_palette_hdmi(uint8_t i, uint32_t color888) {
-    // Store color and update TMDS immediately
-    // (This is safe because S9xFixColourBrightness is called between frames)
-    color888 &= 0x00ffffff;
-    palette[i] = color888;
+    palette[i] = color888 & 0x00ffffff;
 
-    // Don't write to hardware palette for HDMI control indices (251-254), but allow 255 (bgcolor)
-    if ((i >= BASE_HDMI_CTRL_INX) && (i != 255)) return;
-
-    // Apply greyscale conversion if active
-    uint32_t display_color = greyscale_active ? rgb_to_grey(color888) : color888;
-
-    uint64_t* conv_color64 = (uint64_t *)conv_color;
-    const uint8_t R = (display_color >> 16) & 0xff;
-    const uint8_t G = (display_color >> 8) & 0xff;
-    const uint8_t B = (display_color >> 0) & 0xff;
-    conv_color64[i * 2] = get_ser_diff_data(tmds_encode(R), tmds_encode(G), tmds_encode(B));
-    conv_color64[i * 2 + 1] = conv_color64[i * 2] ^ 0x0003ffffffffffffl;
-}
-
-// Mark that a full palette update is needed (no longer used - kept for API compatibility)
-void graphics_request_palette_update(void) {
-    // Immediate conversion now happens in graphics_set_palette_hdmi()
-}
-
-// Convert all palette entries to TMDS format (called during vblank)
-void graphics_convert_all_palette(void) {
-    uint64_t* conv_color64 = (uint64_t *)conv_color;
-    
-    // Convert first 251 colors (0-250) - skip HDMI control indices
-    for (int i = 0; i < BASE_HDMI_CTRL_INX; i++) {
-        uint32_t color888 = greyscale_active ? rgb_to_grey(palette[i]) : palette[i];
-        const uint8_t R = (color888 >> 16) & 0xff;
-        const uint8_t G = (color888 >> 8) & 0xff;
-        const uint8_t B = (color888 >> 0) & 0xff;
-        conv_color64[i * 2] = get_ser_diff_data(tmds_encode(R), tmds_encode(G), tmds_encode(B));
-        conv_color64[i * 2 + 1] = conv_color64[i * 2] ^ 0x0003ffffffffffffl;
+    // For HDMI sync control indices (240-243), find nearest color in range 0-239
+    if (i >= 240 && i <= 243) {
+        uint8_t r = (color888 >> 16) & 0xff;
+        uint8_t g = (color888 >> 8) & 0xff;
+        uint8_t b = color888 & 0xff;
+        
+        int best_match = 239;
+        int best_distance = 999999;
+        
+        // Find closest color in palette 0-239
+        for (int j = 0; j < 240; j++) {
+            uint8_t pr = (palette[j] >> 16) & 0xff;
+            uint8_t pg = (palette[j] >> 8) & 0xff;
+            uint8_t pb = palette[j] & 0xff;
+            
+            int dr = r - pr;
+            int dg = g - pg;
+            int db = b - pb;
+            int distance = dr*dr + dg*dg + db*db;
+            
+            if (distance < best_distance) {
+                best_distance = distance;
+                best_match = j;
+            }
+        }
+        
+        color_substitute[i - 240] = best_match;
+        return; // Don't set hardware palette for these indices
     }
 
-    // Also update color 255 (bgcolor)
-    uint32_t c255 = greyscale_active ? rgb_to_grey(palette[255]) : palette[255];
-    const uint8_t R = (c255 >> 16) & 0xff;
-    const uint8_t G = (c255 >> 8) & 0xff;
-    const uint8_t B = (c255 >> 0) & 0xff;
-    conv_color64[255 * 2] = get_ser_diff_data(tmds_encode(R), tmds_encode(G), tmds_encode(B));
-    conv_color64[255 * 2 + 1] = conv_color64[255 * 2] ^ 0x0003ffffffffffffl;
-
-    // Restore sync colors
-    graphics_restore_sync_colors();
-
-    // Keep substitute map up to date for any accidental use of reserved indices
-    hdmi_recompute_color_substitute();
-}
-
-// Restore sync colors after palette update (called during vblank)
-// Apply pending palette during vblank
-static void apply_pending_palette(void) {
-    if (!full_palette_update_pending) return;
-    
-    // Convert all software palette to TMDS
-    graphics_convert_all_palette();
-    
-    full_palette_update_pending = false;
+    uint64_t* conv_color64 = (uint64_t *)conv_color;
+    const uint8_t R = (color888 >> 16) & 0xff;
+    const uint8_t G = (color888 >> 8) & 0xff;
+    const uint8_t B = (color888 >> 0) & 0xff;
+    conv_color64[i * 2] = get_ser_diff_data(tmds_encoder(R), tmds_encoder(G), tmds_encoder(B));
+    conv_color64[i * 2 + 1] = conv_color64[i * 2] ^ 0x0003ffffffffffffl;
 };
 
 #define RGB888(r, g, b) ((r<<16) | (g << 8 ) | b )
@@ -776,12 +649,6 @@ void graphics_init_hdmi() {
     dma_chan_pal_conv = dma_claim_unused_channel(true);
 
     hdmi_init();
-    
-    // Initialize palette to all black and immediately convert to TMDS
-    for (int i = 0; i < 256; i++) {
-        palette[i] = 0;
-    }
-    graphics_convert_all_palette();
 }
 
 void graphics_set_bgcolor_hdmi(uint32_t color888) //определяем зарезервированный цвет в палитре
@@ -809,15 +676,6 @@ void graphics_restore_sync_colors(void) {
 
     conv_color64[2 * (base_inx + 3) + 0] = get_ser_diff_data(b0, b0, b0);
     conv_color64[2 * (base_inx + 3) + 1] = get_ser_diff_data(b0, b0, b0);
-}
-
-void graphics_set_mode(enum graphics_mode_t mode) {
-    hdmi_graphics_mode = mode;
-}
-
-// Debug function to get palette value
-uint32_t graphics_get_palette(uint8_t i) {
-    return palette[i];
 }
 
 // Wrappers for existing API

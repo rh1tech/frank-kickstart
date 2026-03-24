@@ -31,7 +31,6 @@ add_subdirectory(drivers/usbhid)
 # Driver library
 add_library(drivers
     drivers/HDMI.c
-    drivers/hdmi_scanline.S
 )
 target_include_directories(drivers PUBLIC drivers src)
 target_compile_definitions(drivers PRIVATE

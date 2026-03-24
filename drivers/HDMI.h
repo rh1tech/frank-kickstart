@@ -6,7 +6,7 @@
 #include "stdbool.h"
 #include "hardware/dma.h" // Added for DMA_IRQ_0
 
-#define VIDEO_DMA_IRQ (DMA_IRQ_1)
+#define VIDEO_DMA_IRQ (DMA_IRQ_0)
 
 #ifndef HDMI_BASE_PIN
 #define HDMI_BASE_PIN (6)
@@ -20,10 +20,10 @@
 #endif
 
 #ifndef PIO_VIDEO
-#define PIO_VIDEO pio0
+#define PIO_VIDEO pio1
 #endif
 #ifndef PIO_VIDEO_ADDR
-#define PIO_VIDEO_ADDR pio0
+#define PIO_VIDEO_ADDR pio1
 #endif
 
 #ifndef beginHDMI_PIN_data
@@ -49,7 +49,6 @@ typedef struct video_mode_t{
 enum graphics_mode_t {
     TEXTMODE_DEFAULT,
     GRAPHICSMODE_DEFAULT,
-    GRAPHICSMODE_RGB565,  // Direct 16-bit RGB565 mode for SNES
 };
 
 void graphics_init(g_out g_out);
@@ -60,19 +59,12 @@ uint32_t graphics_get_height(void);
 void graphics_set_res(int w, int h);
 void graphics_set_shift(int x, int y);
 void graphics_set_palette(uint8_t i, uint32_t color888);
-uint32_t graphics_get_palette(uint8_t i);
 void graphics_restore_sync_colors(void);
 void startVIDEO(uint8_t vol);
 void set_palette(uint8_t n); // переключение палитр
-void graphics_set_mode(enum graphics_mode_t mode);
 
 struct video_mode_t graphics_get_video_mode(int mode);
 void graphics_set_bgcolor(uint32_t color888);
-
-void graphics_set_crt_active(bool active);
-bool graphics_get_crt_active(void);
-void graphics_set_greyscale(bool active);
-bool graphics_get_greyscale(void);
 
 
 static const uint32_t tab_color[11][16] =
