@@ -1,0 +1,15 @@
+# Build directories
+build/
+build.log
+
+# Third party dependencies
+third_party/
+
+# IDE
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
