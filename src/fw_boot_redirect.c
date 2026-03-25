@@ -6,6 +6,7 @@
  */
 
 #include <stdint.h>
+#include "pico.h"
 #include "hardware/regs/m33.h"
 
 #define ZERO_BLOCK_OFFSET   ((16ul << 20) - (256ul << 10) - (4ul << 10))
