@@ -1,54 +1,56 @@
 /* Kickstarter — Custom linker script for 16MB flash.
+ * Based on pico-launcher m1p2-uf2 branch.
  *
  * Flash layout (16MB):
- *   BOOT2  0x10000000  4KB   — vectors + IMAGE_DEF (ROM entry point)
- *   (gap)  0x10001000        — user firmware area (~15MB)
- *   ERASE  0x10EFF000  4KB   — ZERO_BLOCK (saved sector 0 of flashed firmware)
- *   FLASH  0x10F00000  1MB   — Kickstarter code, rodata, data LMA
- *
- * Based on rhea/FRANK OS memmap.ld.in
+ *   BOOT2  0x10000000             4KB   — vectors + IMAGE_DEF
+ *   (gap)  0x10001000             ~15.7MB — user firmware area
+ *   ERASE  0x10000000+16M-260k   4KB   — ZERO_BLOCK
+ *   FLASH  0x10000000+16M-256k   256KB — Kickstarter code
  */
 
 MEMORY
 {
-    BOOT2(rx)     : ORIGIN = 0x10000000, LENGTH = 4k
-    ERASE(rx)     : ORIGIN = 0x10EFF000, LENGTH = 4k
-    FLASH(rx)     : ORIGIN = 0x10F00000, LENGTH = 1024k
-    RAM(rwx)      : ORIGIN = 0x20000000, LENGTH = 512k
-    SCRATCH_X(rwx): ORIGIN = 0x20080000, LENGTH = 4k
-    SCRATCH_Y(rwx): ORIGIN = 0x20081000, LENGTH = 4k
+    BOOT2(rx) : ORIGIN = 0x10000000, LENGTH = 4k
+    ERASE(rx) : ORIGIN = 0x10000000 + 16M - 260k, LENGTH = 4k
+    FLASH(rx) : ORIGIN = 0x10000000 + 16M - 256k, LENGTH = 256k
+    RAM(rwx) : ORIGIN =  0x20000000, LENGTH = 512k
+    SCRATCH_X(rwx) : ORIGIN = 0x20080000, LENGTH = 4k
+    SCRATCH_Y(rwx) : ORIGIN = 0x20081000, LENGTH = 4k
 }
 
 ENTRY(_entry_point)
 
 SECTIONS
 {
-    /* Boot vectors at flash offset 0 — ROM scans first 4KB for IMAGE_DEF.
-     * The vector table word[1] (Reset) automatically points to .reset
-     * in FLASH at 0x10F00000+ since the linker resolves symbols. */
-    .boot_vectors : {
+    .flash_begin : {
         __flash_binary_start = .;
+    } > FLASH
+
+    .xip_hdr : {
         __logical_binary_start = .;
         KEEP (*(.vectors))
         KEEP (*(.binary_info_header))
         __binary_info_header_end = .;
         KEEP (*(.embedded_block))
         __embedded_block_end = .;
+        . = ALIGN(4);
     } > BOOT2
 
+    .erase : {
+        KEEP(*(.erase_block))
+    } > ERASE
+
     .text : {
-        KEEP (*(.reset))
+        KEEP(*(.reset))
         *(.init)
         *libgcc.a:cmse_nonsecure_call.o
         *(EXCLUDE_FILE(*libgcc.a: *libc.a:*lib_a-mem*.o *libm.a:) .text*)
         *(.fini)
-        /* Pull all c'tors into .text */
         *crtbegin.o(.ctors)
         *crtbegin?.o(.ctors)
         *(EXCLUDE_FILE(*crtend?.o *crtend.o) .ctors)
         *(SORT(.ctors.*))
         *(.ctors)
-        /* Followed by destructors */
         *crtbegin.o(.dtors)
         *crtbegin?.o(.dtors)
         *(EXCLUDE_FILE(*crtend?.o *crtend.o) .dtors)
@@ -73,21 +75,9 @@ SECTIONS
         *(.fini_array)
         PROVIDE_HIDDEN (__fini_array_end = .);
 
-        /* Kickstarter boot redirect */
-        *(.boot_redirect*)
-
         *(.eh_frame*)
         . = ALIGN(4);
     } > FLASH
-
-    .boot2 : {
-        __boot2_start__ = .;
-        *(.boot2)
-        __boot2_end__ = .;
-    } > FLASH
-
-    ASSERT(__boot2_end__ - __boot2_start__ <= 256,
-        "ERROR: Pico second stage bootloader must be no more than 256 bytes in size")
 
     .rodata : {
         *(EXCLUDE_FILE(*libgcc.a: *libc.a:*lib_a-mem*.o *libm.a:) .rodata*)
@@ -119,11 +109,6 @@ SECTIONS
     __binary_info_end = .;
     . = ALIGN(4);
 
-    /* ZERO_BLOCK erase placeholder — 4KB sector at 0x10EFF000 */
-    .erase_block (NOLOAD) : {
-        *(.erase_block*)
-    } > ERASE
-
     .ram_vector_table (NOLOAD): {
         *(.ram_vector_table)
     } > RAM
@@ -139,7 +124,6 @@ SECTIONS
 
         *(.time_critical*)
 
-        /* remaining .text and .rodata; i.e. stuff excluded above for RAM */
         *(.text*)
         . = ALIGN(4);
         *(.rodata*)
