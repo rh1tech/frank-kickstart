@@ -1,0 +1,8 @@
+<firmware>
+  <title>DOOM</title>
+  <version>1.11</version>
+  <author>Mikhail Matveev</author>
+  <website>https://github.com/rh1tech/murmdoom</website>
+  <description>DOOM for Raspberry Pi Pico 2 (RP2350) with HDMI output, SD card, PS/2 and USB keyboard/mouse, and OPL music. Runs the classic ID Software FPS on the FRANK board with SD card WAD loading.</description>
+  <controls>Gamepad, mouse, keyboard (PS/2 and USB)</controls>
+</firmware>

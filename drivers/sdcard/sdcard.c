@@ -5,6 +5,7 @@
 #include "hardware/clocks.h"
 #ifndef SDCARD_PIO
 #include "hardware/spi.h"
+#include "hardware/dma.h"
 #else
 #include "pio_spi.h"
 #endif
@@ -193,6 +194,47 @@ BYTE xchg_spi (
 }
 
 
+/* DMA-based SPI bulk receive — doesn't monopolize APB bus from CPU */
+#ifndef SDCARD_PIO
+static int spi_dma_tx = -1;
+static int spi_dma_rx = -1;
+static uint8_t spi_dummy_byte = 0xFF;
+
+static void spi_dma_init_once(void) {
+	if (spi_dma_tx >= 0) return;
+	spi_dma_tx = dma_claim_unused_channel(true);
+	spi_dma_rx = dma_claim_unused_channel(true);
+}
+
+static void spi_dma_read(spi_inst_t *spi, uint8_t *dst, size_t len) {
+	spi_dma_init_once();
+
+	// TX channel: send 0xFF repeatedly (no increment, paced by SPI TX DREQ)
+	dma_channel_config tx_cfg = dma_channel_get_default_config(spi_dma_tx);
+	channel_config_set_transfer_data_size(&tx_cfg, DMA_SIZE_8);
+	channel_config_set_read_increment(&tx_cfg, false);
+	channel_config_set_write_increment(&tx_cfg, false);
+	channel_config_set_dreq(&tx_cfg, spi_get_dreq(spi, true));
+	dma_channel_configure(spi_dma_tx, &tx_cfg, &spi_get_hw(spi)->dr, &spi_dummy_byte, len, false);
+
+	// RX channel: read into buffer (increment, paced by SPI RX DREQ)
+	dma_channel_config rx_cfg = dma_channel_get_default_config(spi_dma_rx);
+	channel_config_set_transfer_data_size(&rx_cfg, DMA_SIZE_8);
+	channel_config_set_read_increment(&rx_cfg, false);
+	channel_config_set_write_increment(&rx_cfg, true);
+	channel_config_set_dreq(&rx_cfg, spi_get_dreq(spi, false));
+	dma_channel_configure(spi_dma_rx, &rx_cfg, dst, &spi_get_hw(spi)->dr, len, false);
+
+	// Start both channels simultaneously
+	dma_start_channel_mask((1u << spi_dma_tx) | (1u << spi_dma_rx));
+	dma_channel_wait_for_finish_blocking(spi_dma_rx);
+
+	// Clean up: abort TX in case it's still going, drain SPI RX FIFO
+	dma_channel_abort(spi_dma_tx);
+	while (spi_is_readable(spi)) (void)spi_get_hw(spi)->dr;
+}
+#endif
+
 /* Receive multiple byte */
 static
 void rcvr_spi_multi (
@@ -202,7 +244,7 @@ void rcvr_spi_multi (
 {
 	uint8_t *b = (uint8_t *) buff;
 #ifndef SDCARD_PIO
-	spi_read_blocking(SDCARD_SPI_BUS, 0xff, b, btr);
+	spi_dma_read(SDCARD_SPI_BUS, b, btr);
 #else
 	pio_spi_repeat8_read8_blocking(&pio_spi, 0xff, b, btr);
 #endif

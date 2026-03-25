@@ -3,6 +3,6 @@
   <version>1.01</version>
   <author>Mikhail Matveev</author>
   <website>https://github.com/rh1tech/murmheretic</website>
-  <description>Heretic game engine port for RP2350. Runs the classic 1994 Raven Software FPS on the murmulator board with HDMI output, SD card WAD loading, and gamepad support.</description>
+  <description>Heretic game engine port for RP2350. Runs the classic 1994 Raven Software FPS on the FRANK board with HDMI output, SD card WAD loading, and gamepad support.</description>
   <controls>Gamepad, mouse, keyboard (PS/2 and USB)</controls>
 </firmware>

@@ -21,6 +21,8 @@
 #endif
 
 #include "board_config.h"
+#include "nespad.h"
+#include "ps2kbd_wrapper.h"
 #include "dvi.h"
 #include "dvi_timing.h"
 #include "dvi_serialiser.h"
@@ -36,7 +38,7 @@
 #define SCREEN_H 300
 #define DVI_TIMING dvi_timing_800x600p_60hz
 #define BASE_DIR "/kickstarter"
-#define MAX_ENTRIES 64
+#define MAX_ENTRIES 16
 #define MAX_PATH 128
 #define MAX_TEXT 256
 
@@ -78,6 +80,7 @@ struct semaphore dvi_start_sem;
 static uint8_t framebuffer[SCREEN_W * SCREEN_H];
 static uint32_t palette_rgb888[256];
 static uint8_t palette_rgb332[256];
+static volatile bool dvi_loading = false;  // When true, Core 1 outputs blank instead of encoding
 static uint8_t scanline_rgb332[SCREEN_W] __attribute__((aligned(4)));
 
 static FATFS fs;
@@ -265,7 +268,9 @@ typedef struct {
     char controls[128];
     // Cover art
     bool has_bmp;
-    uint8_t bmp_palette[256]; // RGB332 palette for BMP
+    uint8_t bmp_palette[256]; // maps BMP index -> screen palette index
+    uint32_t bmp_rgb888[256]; // BMP palette colors for reload on display
+    int bmp_ncolors;
     int bmp_w, bmp_h;
     uint8_t *bmp_pixels;     // allocated, bmp_w * bmp_h bytes (palette indices)
 } uf2_entry_t;
@@ -274,8 +279,8 @@ static uf2_entry_t entries[MAX_ENTRIES];
 static int entry_count = 0;
 static int selected = 0;
 
-// Shared BMP pixel buffer (reused per entry since only one displayed at a time)
-static uint8_t bmp_pixel_buf[200 * 200]; // max 200x200 cover art
+// Temporary BMP pixel buffer for loading (copied to malloc'd per-entry storage)
+static uint8_t bmp_pixel_buf[200 * 200];
 
 // ============================================================================
 // Simple XML parser (extracts tag values)
@@ -346,10 +351,11 @@ static bool load_entry_bmp(uf2_entry_t *e, const char *path) {
     // (0-15 reserved for UI colors)
     int ncolors = pal_size / 4;
     if (ncolors > 240) ncolors = 240;
+    e->bmp_ncolors = ncolors;
     for (int i = 0; i < ncolors; i++) {
         uint8_t b = pal[i * 4 + 0], g = pal[i * 4 + 1], r = pal[i * 4 + 2];
-        e->bmp_palette[i] = 16 + i;  // map BMP index i -> screen palette 16+i
-        palette_set(16 + i, (r << 16) | (g << 8) | b);
+        e->bmp_palette[i] = 16 + i;
+        e->bmp_rgb888[i] = (r << 16) | (g << 8) | b;
     }
 
     f_lseek(&file, pixel_offset);
@@ -359,15 +365,18 @@ static bool load_entry_bmp(uf2_entry_t *e, const char *path) {
 
     e->bmp_w = bmp_w;
     e->bmp_h = bmp_h;
-    e->bmp_pixels = bmp_pixel_buf;
 
+    // Read into temp buffer, then malloc per-entry storage
     for (int row = 0; row < bmp_h; row++) {
         if (f_read(&file, row_buf, row_stride, &br) != FR_OK) break;
         int dst_y = top_down ? row : (bmp_h - 1 - row);
-        memcpy(&e->bmp_pixels[dst_y * bmp_w], row_buf, bmp_w);
+        memcpy(&bmp_pixel_buf[dst_y * bmp_w], row_buf, bmp_w);
     }
-
     f_close(&file);
+
+    e->bmp_pixels = (uint8_t *)malloc(bmp_w * bmp_h);
+    if (!e->bmp_pixels) return false;
+    memcpy(e->bmp_pixels, bmp_pixel_buf, bmp_w * bmp_h);
     e->has_bmp = true;
     return true;
 }
@@ -417,6 +426,12 @@ static void scan_entries(void) {
 static void load_entry_metadata(int idx) {
     uf2_entry_t *e = &entries[idx];
     char path[MAX_PATH];
+
+    // Reset metadata (keep filename/basename)
+    e->title[0] = e->version[0] = e->author[0] = 0;
+    e->website[0] = e->description[0] = e->controls[0] = 0;
+    e->has_bmp = false;
+    strncpy(e->title, e->basename, sizeof(e->title) - 1);
 
     // Try loading XML
     snprintf(path, sizeof(path), BASE_DIR "/%s.xml", e->basename);
@@ -479,8 +494,9 @@ static void draw_label(int x, int y, const char *label, const char *value) {
 }
 
 static void render_entry(int idx) {
-    // Clear
-    memset(framebuffer, COL_BG, sizeof(framebuffer));
+    // Clear framebuffer in small chunks to avoid bus starvation of Core 1 DVI
+    for (int y = 0; y < SCREEN_H; y++)
+        memset(&framebuffer[y * SCREEN_W], COL_BG, SCREEN_W);
 
     if (entry_count == 0) {
         fb_text_center(SCREEN_H / 2 - 4, "No UF2 files found", COL_WHITE);
@@ -490,7 +506,13 @@ static void render_entry(int idx) {
 
     uf2_entry_t *e = &entries[idx];
 
-    // Draw image (no border)
+    // Reload BMP palette into screen palette for this entry
+    if (e->has_bmp) {
+        for (int i = 0; i < e->bmp_ncolors; i++)
+            palette_set(16 + i, e->bmp_rgb888[i]);
+    }
+
+    // Draw image
     if (e->has_bmp && e->bmp_pixels) {
         int ox = IMG_X;
         int oy = IMG_Y;
@@ -566,18 +588,31 @@ void __not_in_flash_func(core1_main)(void) {
     uint words_per_channel = pixwidth / DVI_SYMBOLS_PER_WORD;
     uint32_t *tmdsbuf;
 
+    // Pre-compute blank scanline (background color TMDS)
+    memset(scanline_rgb332, palette_rgb332[COL_BG], SCREEN_W);
+    const uint32_t *blankbuf = (const uint32_t *)scanline_rgb332;
+    static uint32_t blank_tmds[3 * (800 / DVI_SYMBOLS_PER_WORD)];
+    tmds_encode_data_channel_8bpp(blankbuf, blank_tmds + 0 * words_per_channel, pixwidth / 2, DVI_8BPP_BLUE_MSB,  DVI_8BPP_BLUE_LSB);
+    tmds_encode_data_channel_8bpp(blankbuf, blank_tmds + 1 * words_per_channel, pixwidth / 2, DVI_8BPP_GREEN_MSB, DVI_8BPP_GREEN_LSB);
+    tmds_encode_data_channel_8bpp(blankbuf, blank_tmds + 2 * words_per_channel, pixwidth / 2, DVI_8BPP_RED_MSB,   DVI_8BPP_RED_LSB);
+
     while (true) {
         for (uint y = 0; y < SCREEN_H; y++) {
             queue_remove_blocking_u32(&dvi0.q_tmds_free, &tmdsbuf);
 
-            const uint8_t *src = &framebuffer[y * SCREEN_W];
-            for (int x = 0; x < SCREEN_W; x++)
-                scanline_rgb332[x] = palette_rgb332[src[x]];
+            if (dvi_loading) {
+                // During SD access: output pre-computed blank — no SRAM reads that compete with Core 0
+                memcpy(tmdsbuf, blank_tmds, 3 * words_per_channel * sizeof(uint32_t));
+            } else {
+                const uint8_t *src = &framebuffer[y * SCREEN_W];
+                for (int x = 0; x < SCREEN_W; x++)
+                    scanline_rgb332[x] = palette_rgb332[src[x]];
 
-            const uint32_t *pixbuf = (const uint32_t *)scanline_rgb332;
-            tmds_encode_data_channel_8bpp(pixbuf, tmdsbuf + 0 * words_per_channel, pixwidth / 2, DVI_8BPP_BLUE_MSB,  DVI_8BPP_BLUE_LSB);
-            tmds_encode_data_channel_8bpp(pixbuf, tmdsbuf + 1 * words_per_channel, pixwidth / 2, DVI_8BPP_GREEN_MSB, DVI_8BPP_GREEN_LSB);
-            tmds_encode_data_channel_8bpp(pixbuf, tmdsbuf + 2 * words_per_channel, pixwidth / 2, DVI_8BPP_RED_MSB,   DVI_8BPP_RED_LSB);
+                const uint32_t *pixbuf = (const uint32_t *)scanline_rgb332;
+                tmds_encode_data_channel_8bpp(pixbuf, tmdsbuf + 0 * words_per_channel, pixwidth / 2, DVI_8BPP_BLUE_MSB,  DVI_8BPP_BLUE_LSB);
+                tmds_encode_data_channel_8bpp(pixbuf, tmdsbuf + 1 * words_per_channel, pixwidth / 2, DVI_8BPP_GREEN_MSB, DVI_8BPP_GREEN_LSB);
+                tmds_encode_data_channel_8bpp(pixbuf, tmdsbuf + 2 * words_per_channel, pixwidth / 2, DVI_8BPP_RED_MSB,   DVI_8BPP_RED_LSB);
+            }
 
             queue_add_blocking_u32(&dvi0.q_tmds_valid, &tmdsbuf);
         }
@@ -623,13 +658,25 @@ int main(void) {
     }
     printf("SD card mounted.\n");
 
-    // Scan for UF2 files
-    scan_entries();
+    // Initialize input devices BEFORE DVI (PS/2 uses pio1)
+    nespad_begin(clock_get_hz(clk_sys) / 1000, NESPAD_GPIO_CLK, NESPAD_GPIO_DATA, NESPAD_GPIO_LATCH);
+    printf("NES gamepad initialized (CLK=%d, DATA=%d, LATCH=%d)\n",
+           NESPAD_GPIO_CLK, NESPAD_GPIO_DATA, NESPAD_GPIO_LATCH);
 
-    // Load first entry metadata
-    if (entry_count > 0) {
-        load_entry_metadata(0);
+    ps2kbd_init();
+    printf("PS/2 keyboard initialized (CLK=%d, DATA=%d)\n", PS2_PIN_CLK, PS2_PIN_DATA);
+
+    // Scan for UF2 files and pre-load ALL metadata before DVI starts
+    // (SPI access is incompatible with PicoDVI at 400 MHz)
+    scan_entries();
+    for (int i = 0; i < entry_count; i++) {
+        load_entry_metadata(i);
+        printf("  [%d/%d] %s\n", i + 1, entry_count, entries[i].title);
     }
+
+    // Unmount SD — no more SD access after DVI starts
+    f_unmount("");
+    printf("SD unmounted (all data pre-loaded).\n");
 
     // Render initial screen
     render_entry(selected);
@@ -637,30 +684,65 @@ int main(void) {
 start_dvi:
     // Launch Core 1 for DVI
     sem_init(&dvi_start_sem, 0, 1);
-    hw_set_bits(&bus_ctrl_hw->priority, BUSCTRL_BUS_PRIORITY_PROC1_BITS);
+    hw_set_bits(&bus_ctrl_hw->priority,
+        BUSCTRL_BUS_PRIORITY_PROC1_BITS |   // Core 1 CPU priority
+        BUSCTRL_BUS_PRIORITY_DMA_R_BITS |   // DMA read priority (TMDS -> PIO)
+        BUSCTRL_BUS_PRIORITY_DMA_W_BITS);   // DMA write priority
     multicore_launch_core1(core1_main);
     sem_release(&dvi_start_sem);
     printf("DVI started.\n");
 
-    // Main loop: handle input
-    // TODO: Add NES gamepad and PS/2 keyboard input
-    // For now, use USB serial: 'l' = left, 'r' = right
-    while (1) {
-        int c = getchar_timeout_us(50000); // 50ms poll
-        if (c == PICO_ERROR_TIMEOUT) continue;
+    // Main loop: handle input from gamepad, keyboard, and serial
+    uint32_t prev_input = 0;
+    uint32_t repeat_timer = 0;
 
+    while (1) {
+        sleep_ms(16); // ~60 Hz poll rate
+
+        // Read all input sources
+        nespad_read();
+        ps2kbd_tick();
+        uint16_t kbd = ps2kbd_get_state();
+
+        // Combine into a unified input bitmask
+        uint32_t input = 0;
+        if (nespad_state & DPAD_LEFT)   input |= 1;
+        if (nespad_state & DPAD_RIGHT)  input |= 2;
+        if (nespad_state & DPAD_A)      input |= 4;
+        if (nespad_state & DPAD_START)  input |= 4;
+        if (kbd & KBD_STATE_LEFT)       input |= 1;
+        if (kbd & KBD_STATE_RIGHT)      input |= 2;
+        if (kbd & KBD_STATE_A)          input |= 4;
+        if (kbd & KBD_STATE_START)      input |= 4;
+
+        // USB serial fallback
+        int c = getchar_timeout_us(0);
+        if (c == 'l' || c == 'h') input |= 1;
+        if (c == 'r')             input |= 2;
+
+        // Edge detection with auto-repeat
+        uint32_t pressed = input & ~prev_input; // newly pressed
+        if (input && input == prev_input) {
+            repeat_timer++;
+            if (repeat_timer > 20 && repeat_timer % 5 == 0) // repeat after 320ms, every 80ms
+                pressed = input;
+        } else {
+            repeat_timer = 0;
+        }
+        prev_input = input;
+
+        // Handle navigation
         bool changed = false;
-        if ((c == 'l' || c == 'h') && entry_count > 0) {
+        if ((pressed & 1) && entry_count > 0) {
             selected = (selected - 1 + entry_count) % entry_count;
             changed = true;
         }
-        if ((c == 'r' || c == 'l' + 6) && entry_count > 0) { // 'r' or 'l'
+        if ((pressed & 2) && entry_count > 0) {
             selected = (selected + 1) % entry_count;
             changed = true;
         }
 
         if (changed) {
-            load_entry_metadata(selected);
             render_entry(selected);
             printf("Selected: %s (%d/%d)\n", entries[selected].filename, selected + 1, entry_count);
         }
