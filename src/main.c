@@ -20,6 +20,8 @@
 #include "hardware/structs/qmi.h"
 #endif
 
+#include "hardware/flash.h"
+#include "hardware/watchdog.h"
 #include "board_config.h"
 #include "nespad.h"
 #include "ps2kbd_wrapper.h"
@@ -76,6 +78,13 @@
 
 struct dvi_inst dvi0;
 struct semaphore dvi_start_sem;
+
+static volatile bool core1_idle = false;
+
+// Core 1 idle loop — MUST be in RAM since XIP is disabled during flash ops
+static void __not_in_flash_func(core1_idle_loop)(void) {
+    while (core1_idle) __wfe();
+}
 
 static uint8_t framebuffer[SCREEN_W * SCREEN_H];
 static uint32_t palette_rgb888[256];
@@ -562,6 +571,162 @@ static void render_entry(int idx) {
 // ============================================================================
 // DVI output (Core 1)
 // ============================================================================
+// UF2 Flashing (from rhea/FRANK OS)
+// ============================================================================
+
+typedef struct {
+    uint32_t magicStart0;
+    uint32_t magicStart1;
+    uint32_t flags;
+    uint32_t targetAddr;
+    uint32_t payloadSize;
+    uint32_t blockNo;
+    uint32_t numBlocks;
+    uint32_t fileSize;
+    uint8_t data[476];
+    uint32_t magicEnd;
+} UF2_Block_t;
+
+// Read UF2 blocks into a 4KB sector buffer. Returns next expected flash offset.
+static uint32_t read_flash_block(FIL *f, uint8_t *buffer, uint32_t expected_offset, UF2_Block_t *uf2, size_t *psz) {
+    *psz = 0;
+    UINT br;
+    for (uint32_t idx = 0; idx < FLASH_SECTOR_SIZE; idx += 256) {
+        f_read(f, uf2, sizeof(UF2_Block_t), &br);
+        if (!br) break;
+        // Skip metadata blocks
+        if (uf2->targetAddr == XIP_BASE + 0xFFFF00) {
+            f_read(f, uf2, sizeof(UF2_Block_t), &br);
+            if (!br) break;
+        }
+        *psz += br;
+        if (expected_offset != uf2->targetAddr - XIP_BASE) {
+            f_lseek(f, f_tell(f) - sizeof(UF2_Block_t));
+            expected_offset = uf2->targetAddr - XIP_BASE;
+            *psz -= br;
+            break;
+        }
+        memcpy(buffer + idx, uf2->data, 256);
+        expected_offset += 256;
+    }
+    return expected_offset;
+}
+
+/* Over-mode flash constants (matching rhea/FRANK OS) */
+#define ZERO_BLOCK_OFFSET   ((16ul << 20) - (1ul << 20) - (4ul << 10))  /* 0xEFF000 */
+#define FLASH_MAGIC_OVER    0x3836d91au
+#define SRAM_MAGIC_BOOT     0x383da910u
+
+static void __not_in_flash_func(flash_timings)(void);
+
+static void __not_in_flash_func(do_flash_erase_program)(uint32_t flash_offset, const uint8_t *buffer) {
+    flash_range_erase(flash_offset, FLASH_SECTOR_SIZE);
+    flash_range_program(flash_offset, buffer, FLASH_SECTOR_SIZE);
+}
+
+static void flash_sector_fn(uint8_t *buffer, uint32_t flash_offset) {
+    uint8_t *existing = (uint8_t *)(XIP_BASE + flash_offset);
+    bool match = true;
+    for (uint32_t i = 0; i < FLASH_SECTOR_SIZE; i++) {
+        if (existing[i] != buffer[i]) { match = false; break; }
+    }
+    if (match) return;
+
+    gpio_put(PICO_DEFAULT_LED_PIN, true);
+    uint32_t ints = save_and_disable_interrupts();
+    flash_range_erase(flash_offset, FLASH_SECTOR_SIZE);
+    flash_range_program(flash_offset, buffer, FLASH_SECTOR_SIZE);
+    restore_interrupts(ints);
+    gpio_put(PICO_DEFAULT_LED_PIN, false);
+}
+
+static bool flash_uf2(const char *path) {
+    // Stop Core 1's DVI loop and kill DVI DMA
+    core1_idle = true;
+    sleep_ms(50);  // Let Core 1 finish current frame
+
+    // Disable DVI PIO and abort all DMA channels to stop APB traffic
+    pio_set_sm_mask_enabled(dvi0.ser_cfg.pio, 0x0F, false);
+    for (int i = 0; i < N_TMDS_LANES; i++) {
+        dma_channel_abort(dvi0.dma_cfg[i].chan_ctrl);
+        dma_channel_abort(dvi0.dma_cfg[i].chan_data);
+    }
+
+    // Lower clock for safe flash operations
+    set_sys_clock_khz(150000, true);
+    sleep_ms(50);
+
+    gpio_init(PICO_DEFAULT_LED_PIN);
+    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
+
+    // Test: can we erase any flash sector at all?
+    printf("Flash test: erasing sector at 0x100000...\n");
+    stdio_flush();
+    uint32_t ints = save_and_disable_interrupts();
+    flash_range_erase(0x100000, FLASH_SECTOR_SIZE);
+    restore_interrupts(ints);
+    printf("Flash test OK!\n");
+    stdio_flush();
+    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
+
+    FILINFO fi;
+    FIL file;
+    if (f_stat(path, &fi) != FR_OK || f_open(&file, path, FA_READ) != FR_OK) {
+        printf("Cannot open %s\n", path);
+        return false;
+    }
+
+    uint32_t file_size = (uint32_t)fi.fsize;
+    uint32_t expected_size = file_size >> 1;
+    printf("Flashing: %s (%lu bytes, ~%lu KB firmware)\n",
+           path, (unsigned long)file_size, (unsigned long)(expected_size >> 10));
+
+    static uint8_t sector_buf[FLASH_SECTOR_SIZE] __attribute__((aligned(512)));
+    UF2_Block_t uf2;
+
+    uint32_t flash_offset = 0;
+    uint32_t written = 0;
+
+    while (true) {
+        size_t sz = 0;
+        uint32_t next_offset = read_flash_block(&file, sector_buf, flash_offset, &uf2, &sz);
+        if (next_offset == flash_offset) break;
+        if (sz == 0) {
+            flash_offset = next_offset;
+            printf("  Skip to offset %08lX\n", (unsigned long)flash_offset);
+            continue;
+        }
+
+        written += FLASH_SECTOR_SIZE;
+        uint32_t pct = 0;
+        if (expected_size > 0) pct = (written * 100) / expected_size;
+        if (pct > 100) pct = 100;
+
+        /* Protect kickstarter area (0xEFF000+) */
+        if (flash_offset >= ZERO_BLOCK_OFFSET) {
+            printf("  SKIP offset %08lX (kickstarter area)\n", (unsigned long)flash_offset);
+            flash_offset = next_offset;
+            continue;
+        }
+
+        printf("  Flash offset %08lX (%lu%%)\n", (unsigned long)flash_offset, (unsigned long)pct);
+        flash_sector_fn(sector_buf, flash_offset);
+        flash_offset = next_offset;
+    }
+
+    f_close(&file);
+    printf("Flash complete. Rebooting...\n");
+
+    /* Reboot — firmware runs directly from its own boot vectors at offset 0 */
+    watchdog_enable(100, true);
+    while (true) tight_loop_contents();
+
+    return true;
+}
+
+// ============================================================================
+// DVI output (Core 1)
+// ============================================================================
 
 static void __not_in_flash_func(flash_timings)(void) {
 #if !PICO_RP2040
@@ -616,12 +781,21 @@ void __not_in_flash_func(core1_main)(void) {
 
             queue_add_blocking_u32(&dvi0.q_tmds_valid, &tmdsbuf);
         }
+
+        // Check if Core 0 wants us to stop (for flash operations)
+        if (core1_idle) {
+            // Must spin in RAM — XIP is disabled during flash erase
+            core1_idle_loop();
+        }
     }
 }
 
 // ============================================================================
 // Main
 // ============================================================================
+
+// Boot redirect (from fw_boot_redirect.c)
+extern int _boot_redirect_check(void);
 
 int main(void) {
     vreg_disable_voltage_limit();
@@ -630,6 +804,13 @@ int main(void) {
     sleep_ms(10);
 
     stdio_init_all();
+
+    // Early gamepad init for escape check
+    nespad_begin(clock_get_hz(clk_sys) / 1000, NESPAD_GPIO_CLK, NESPAD_GPIO_DATA, NESPAD_GPIO_LATCH);
+    sleep_ms(50);
+    nespad_read();
+
+    // No over-mode boot redirect — firmware runs from its own vectors after flash
 
     for (int i = 3; i > 0; i--) {
         printf("Starting in %d...\n", i);
@@ -658,11 +839,7 @@ int main(void) {
     }
     printf("SD card mounted.\n");
 
-    // Initialize input devices BEFORE DVI (PS/2 uses pio1)
-    nespad_begin(clock_get_hz(clk_sys) / 1000, NESPAD_GPIO_CLK, NESPAD_GPIO_DATA, NESPAD_GPIO_LATCH);
-    printf("NES gamepad initialized (CLK=%d, DATA=%d, LATCH=%d)\n",
-           NESPAD_GPIO_CLK, NESPAD_GPIO_DATA, NESPAD_GPIO_LATCH);
-
+    // Initialize PS/2 keyboard (nespad already initialized for escape check)
     ps2kbd_init();
     printf("PS/2 keyboard initialized (CLK=%d, DATA=%d)\n", PS2_PIN_CLK, PS2_PIN_DATA);
 
@@ -674,9 +851,8 @@ int main(void) {
         printf("  [%d/%d] %s\n", i + 1, entry_count, entries[i].title);
     }
 
-    // Unmount SD — no more SD access after DVI starts
-    f_unmount("");
-    printf("SD unmounted (all data pre-loaded).\n");
+    // SD stays mounted for firmware flashing later
+    printf("All data pre-loaded.\n");
 
     // Render initial screen
     render_entry(selected);
@@ -745,6 +921,31 @@ start_dvi:
         if (changed) {
             render_entry(selected);
             printf("Selected: %s (%d/%d)\n", entries[selected].filename, selected + 1, entry_count);
+        }
+
+        // Launch selected firmware (A or Start button)
+        if ((pressed & 4) && entry_count > 0) {
+            printf("Launching: %s\n", entries[selected].filename);
+
+            // Build full path
+            char path[MAX_PATH];
+            snprintf(path, sizeof(path), BASE_DIR "/%s", entries[selected].filename);
+
+            // Show flashing message
+            memset(framebuffer, COL_BG, sizeof(framebuffer));
+            fb_text_center(SCREEN_H / 2 - 10, "Flashing firmware...", COL_WHITE);
+            fb_text_center(SCREEN_H / 2 + 4, entries[selected].title, COL_TITLE);
+            fb_text_center(SCREEN_H / 2 + 18, "Do not power off!", COL_GRAY);
+
+            sleep_ms(500);  // Brief pause before flashing
+
+            // Stop DVI — Core 1 will be locked out during flash
+            // (multicore_lockout_start_blocking requires Core 1 to be in lockout handler)
+
+            // Flash the UF2 (re-mounts SD, flashes, reboots)
+            flash_uf2(path);
+            // If we get here, flashing failed
+            fb_text_center(SCREEN_H / 2 + 32, "Flash failed!", COL_WHITE);
         }
     }
 }

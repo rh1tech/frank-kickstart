@@ -21,7 +21,11 @@ add_subdirectory(drivers/libdvi)
 
 add_executable(kickstarter
     src/main.c
+    src/fw_boot_redirect.c
 )
+
+# Custom linker script: kickstarter at 0x10F00000, firmware area at 0x10000000
+pico_set_linker_script(kickstarter ${CMAKE_SOURCE_DIR}/memmap.kickstarter.ld)
 
 target_include_directories(kickstarter PRIVATE
     src
@@ -36,6 +40,7 @@ target_compile_definitions(kickstarter PRIVATE
     BOARD_${BOARD_VARIANT}
     PICO_ON_DEVICE=1
     DVI_DEFAULT_SERIAL_CONFIG=${DVI_DEFAULT_SERIAL_CONFIG}
+    PICO_FLASH_SIZE_BYTES=16777216
     PICO_CORE1_STACK_SIZE=0x1000
     SDCARD_PIN_SPI0_CS=5
     SDCARD_PIN_SPI0_SCK=6
@@ -57,6 +62,8 @@ target_link_libraries(kickstarter
     hardware_clocks
     hardware_vreg
     hardware_interp
+    hardware_flash
+    hardware_watchdog
     sdcard
     libdvi
     nespad
