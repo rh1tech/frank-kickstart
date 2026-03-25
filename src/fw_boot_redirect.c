@@ -1,8 +1,8 @@
 /*
- * Kickstarter — Boot redirect (from pico-launcher m1p2-uf2)
+ * Frank-Kickstart — Boot redirect (from pico-launcher m1p2-uf2)
  *
  * Runs before main() via __attribute__((constructor)).
- * Checks SRAM magic and ZERO_BLOCK to decide: run firmware or kickstarter.
+ * Checks SRAM magic and ZERO_BLOCK to decide: run firmware or frank-kickstart.
  */
 
 #include <stdint.h>
@@ -25,7 +25,7 @@ static void before_main(void) {
     // If UI magic is set (e.g., from SELECT button), skip redirect
     if (*sram_ui == SRAM_MAGIC_UI) {
         *sram_ui = 0;
-        return;  // run kickstarter
+        return;  // run frank-kickstart
     }
 
     // If boot magic is set (from watchdog reboot after flash), jump to firmware
@@ -46,7 +46,7 @@ static void before_main(void) {
         }
     }
 
-    // No valid firmware or no magic — run kickstarter
+    // No valid firmware or no magic — run frank-kickstart
 }
 
 // ZERO_BLOCK placeholder in flash (linker places at ERASE region)

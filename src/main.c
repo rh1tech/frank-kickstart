@@ -1,7 +1,7 @@
 /*
- * Kickstarter - UF2 Firmware Launcher for RP2350
+ * Frank-Kickstart - UF2 Firmware Launcher for RP2350
  *
- * Scans /kickstarter on SD card for .uf2 files.
+ * Scans /kickstart on SD card for .uf2 files.
  * Displays cover art (BMP) and metadata (XML) on 800x600 HDMI.
  * Left/Right to browse, launch functionality TBD.
  */
@@ -39,7 +39,7 @@
 #define SCREEN_W 400
 #define SCREEN_H 300
 #define DVI_TIMING dvi_timing_800x600p_60hz
-#define BASE_DIR "/kickstarter"
+#define BASE_DIR "/kickstart"
 #define MAX_ENTRIES 16
 #define MAX_PATH 128
 #define MAX_TEXT 256
@@ -503,7 +503,7 @@ static void render_entry(int idx) {
 
     if (entry_count == 0) {
         fb_text_center(SCREEN_H / 2 - 4, "No UF2 files found", COL_WHITE);
-        fb_text_center(SCREEN_H / 2 + 10, "Place .uf2 files in /kickstarter", COL_GRAY);
+        fb_text_center(SCREEN_H / 2 + 10, "Place .uf2 files in /kickstart", COL_GRAY);
         return;
     }
 
@@ -647,7 +647,7 @@ static bool __not_in_flash_func(flash_uf2)(const char *path) {
                 flash_range_erase(ZERO_BLOCK_OFFSET, FLASH_SECTOR_SIZE);
                 flash_range_program(ZERO_BLOCK_OFFSET, buffer, FLASH_SECTOR_SIZE);
             }
-            v[1] = *(uint32_t *)(XIP_BASE + 4);  // patch Reset to kickstarter
+            v[1] = *(uint32_t *)(XIP_BASE + 4);  // patch Reset to frank-kickstart
             v[1023] = orig;
         }
 
@@ -768,7 +768,7 @@ int main(void) {
         sleep_ms(1000);
     }
 
-    printf("Kickstarter - UF2 Launcher\n");
+    printf("Frank-Kickstart - UF2 Launcher\n");
     printf("Clock: %lu MHz\n", clock_get_hz(clk_sys) / 1000000);
 
     // Setup palette and clear

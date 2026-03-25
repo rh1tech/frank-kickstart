@@ -1,11 +1,11 @@
-/* Kickstarter — Custom linker script for 16MB flash.
+/* Frank-Kickstart — Custom linker script for 16MB flash.
  * Based on pico-launcher m1p2-uf2 branch.
  *
  * Flash layout (16MB):
  *   BOOT2  0x10000000             4KB   — vectors + IMAGE_DEF
  *   (gap)  0x10001000             ~15.7MB — user firmware area
  *   ERASE  0x10000000+16M-260k   4KB   — ZERO_BLOCK
- *   FLASH  0x10000000+16M-256k   256KB — Kickstarter code
+ *   FLASH  0x10000000+16M-256k   256KB — Frank-Kickstart code
  */
 
 MEMORY

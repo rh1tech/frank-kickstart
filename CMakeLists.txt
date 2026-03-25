@@ -6,7 +6,7 @@ set(DVI_DEFAULT_SERIAL_CONFIG "murmulator2_cfg" CACHE STRING "DVI pin config")
 
 include(pico_sdk_import.cmake)
 
-project(kickstarter C CXX ASM)
+project(frank-kickstart C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 
@@ -19,15 +19,15 @@ add_subdirectory(drivers/ps2kbd)
 add_subdirectory(drivers/usbhid)
 add_subdirectory(drivers/libdvi)
 
-add_executable(kickstarter
+add_executable(frank-kickstart
     src/main.c
     src/fw_boot_redirect.c
 )
 
-# Custom linker script: kickstarter at 0x10F00000, firmware area at 0x10000000
-pico_set_linker_script(kickstarter ${CMAKE_SOURCE_DIR}/memmap.kickstarter.ld)
+# Custom linker script: frank-kickstart at 0x10F00000, firmware area at 0x10000000
+pico_set_linker_script(frank-kickstart ${CMAKE_SOURCE_DIR}/memmap.frank-kickstart.ld)
 
-target_include_directories(kickstarter PRIVATE
+target_include_directories(frank-kickstart PRIVATE
     src
     drivers
     drivers/sdcard
@@ -36,7 +36,7 @@ target_include_directories(kickstarter PRIVATE
     drivers/libdvi
 )
 
-target_compile_definitions(kickstarter PRIVATE
+target_compile_definitions(frank-kickstart PRIVATE
     BOARD_${BOARD_VARIANT}
     PICO_ON_DEVICE=1
     DVI_DEFAULT_SERIAL_CONFIG=${DVI_DEFAULT_SERIAL_CONFIG}
@@ -51,7 +51,7 @@ target_compile_definitions(kickstarter PRIVATE
     NESPAD_GPIO_DATA=26
 )
 
-target_link_libraries(kickstarter
+target_link_libraries(frank-kickstart
     pico_stdlib
     pico_multicore
     hardware_spi
@@ -71,7 +71,7 @@ target_link_libraries(kickstarter
     usbhid
 )
 
-pico_enable_stdio_uart(kickstarter 0)
-pico_enable_stdio_usb(kickstarter 1)
+pico_enable_stdio_uart(frank-kickstart 0)
+pico_enable_stdio_usb(frank-kickstart 1)
 
-pico_add_extra_outputs(kickstarter)
+pico_add_extra_outputs(frank-kickstart)
