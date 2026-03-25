@@ -1,18 +1,8 @@
 cmake_minimum_required(VERSION 3.13)
 
-# Set board to Pico 2 (RP2350)
 set(PICO_BOARD pico2 CACHE STRING "Pico board type")
-
-# Board configuration variant (M1, M2)
 set(BOARD_VARIANT "M2" CACHE STRING "Board variant: M1 or M2")
-
-# PSRAM speed configuration (84, 100, 133 MHz target)
-set(PSRAM_SPEED "133" CACHE STRING "PSRAM max frequency in MHz: 84, 100, 133")
-
-# USB HID gamepad/keyboard support (disabled by default, conflicts with USB CDC)
-option(USB_HID_ENABLED "Enable USB HID host for gamepads and keyboards" OFF)
-
-message(STATUS "Board: ${BOARD_VARIANT}, PSRAM: ${PSRAM_SPEED} MHz")
+set(DVI_DEFAULT_SERIAL_CONFIG "murmulator2_cfg" CACHE STRING "DVI pin config")
 
 include(pico_sdk_import.cmake)
 
@@ -27,18 +17,7 @@ add_subdirectory(drivers/sdcard)
 add_subdirectory(drivers/nespad)
 add_subdirectory(drivers/ps2kbd)
 add_subdirectory(drivers/usbhid)
-
-# Driver library
-add_library(drivers
-    drivers/HDMI.c
-)
-target_include_directories(drivers PUBLIC drivers src)
-target_compile_definitions(drivers PRIVATE
-    BOARD_${BOARD_VARIANT}
-    PSRAM_MAX_FREQ_MHZ=${PSRAM_SPEED}
-)
-
-target_link_libraries(drivers pico_stdlib hardware_dma hardware_pio hardware_spi hardware_gpio)
+add_subdirectory(drivers/libdvi)
 
 add_executable(kickstarter
     src/main.c
@@ -50,12 +29,14 @@ target_include_directories(kickstarter PRIVATE
     drivers/sdcard
     drivers/nespad
     drivers/ps2kbd
+    drivers/libdvi
 )
 
 target_compile_definitions(kickstarter PRIVATE
     BOARD_${BOARD_VARIANT}
-    PSRAM_MAX_FREQ_MHZ=${PSRAM_SPEED}
     PICO_ON_DEVICE=1
+    DVI_DEFAULT_SERIAL_CONFIG=${DVI_DEFAULT_SERIAL_CONFIG}
+    PICO_CORE1_STACK_SIZE=0x200
     SDCARD_PIN_SPI0_CS=5
     SDCARD_PIN_SPI0_SCK=6
     SDCARD_PIN_SPI0_MOSI=7
@@ -74,14 +55,15 @@ target_link_libraries(kickstarter
     hardware_pwm
     hardware_irq
     hardware_clocks
+    hardware_vreg
+    hardware_interp
     sdcard
-    drivers
+    libdvi
     nespad
     ps2kbd
     usbhid
 )
 
-# USB serial console for debug output
 pico_enable_stdio_uart(kickstarter 0)
 pico_enable_stdio_usb(kickstarter 1)
 
