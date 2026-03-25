@@ -78,6 +78,7 @@
 
 struct dvi_inst dvi0;
 struct semaphore dvi_start_sem;
+static volatile bool core1_stop = false;
 
 static uint8_t framebuffer[SCREEN_W * SCREEN_H];
 static uint32_t palette_rgb888[256];
@@ -594,9 +595,21 @@ static bool __not_in_flash_func(flash_uf2)(const char *path) {
     gpio_init(PICO_DEFAULT_LED_PIN);
     gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
 
-    if (f_open(&file, path, FA_READ) != FR_OK) return false;
+    // Stop DVI BEFORE any SD access (APB contention at 400 MHz)
+    core1_stop = true;
+    sleep_ms(100);
 
+    // Lower clock — ROM flash functions reset QMI, XIP fails at 400 MHz
+    set_sys_clock_khz(150000, true);
+    sleep_ms(50);
+
+    // Now lockout can work — DVI IRQ is no longer firing
     multicore_lockout_start_blocking();
+
+    if (f_open(&file, path, FA_READ) != FR_OK) {
+        multicore_lockout_end_blocking();
+        return false;
+    }
     uint32_t ints = save_and_disable_interrupts();
 
     uint32_t flash_offset = 0;
@@ -625,6 +638,7 @@ static bool __not_in_flash_func(flash_uf2)(const char *path) {
 
         if (next_offset == flash_offset) break;
 
+        // Sector 0: save to ZERO_BLOCK with magic, patch Reset vector
         if (flash_offset == 0) {
             uint32_t *v = (uint32_t *)buffer;
             uint32_t orig = v[1023];
@@ -633,7 +647,7 @@ static bool __not_in_flash_func(flash_uf2)(const char *path) {
                 flash_range_erase(ZERO_BLOCK_OFFSET, FLASH_SECTOR_SIZE);
                 flash_range_program(ZERO_BLOCK_OFFSET, buffer, FLASH_SECTOR_SIZE);
             }
-            v[1] = *(uint32_t *)(XIP_BASE + 4);
+            v[1] = *(uint32_t *)(XIP_BASE + 4);  // patch Reset to kickstarter
             v[1023] = orig;
         }
 
@@ -650,6 +664,7 @@ static bool __not_in_flash_func(flash_uf2)(const char *path) {
     gpio_put(PICO_DEFAULT_LED_PIN, false);
     f_close(&file);
 
+    // SRAM magic tells before_main() to jump to firmware on next boot
     *(volatile uint32_t *)(0x20000000 + (512 << 10) - 8) = SRAM_MAGIC_BOOT;
     watchdog_enable(100, true);
     while (true) tight_loop_contents();
@@ -715,6 +730,17 @@ void __not_in_flash_func(core1_main)(void) {
             queue_add_blocking_u32(&dvi0.q_tmds_valid, &tmdsbuf);
         }
 
+        // Core 0 requested stop for flash — enter RAM-only idle
+        if (core1_stop) {
+            // Disable DVI PIO and DMA so no APB traffic
+            pio_set_sm_mask_enabled(dvi0.ser_cfg.pio, 0x0F, false);
+            for (int i = 0; i < N_TMDS_LANES; i++) {
+                dma_channel_abort(dvi0.dma_cfg[i].chan_ctrl);
+                dma_channel_abort(dvi0.dma_cfg[i].chan_data);
+            }
+            // Now lockout handler can fire (no more DMA IRQ)
+            while (true) __wfe();
+        }
     }
 }
 
@@ -862,7 +888,7 @@ start_dvi:
             fb_text_center(SCREEN_H / 2 + 4, entries[selected].title, COL_TITLE);
             fb_text_center(SCREEN_H / 2 + 18, "Do not power off!", COL_GRAY);
 
-            sleep_ms(500);  // Brief pause before flashing
+            sleep_ms(2000);  // Show message for 2 seconds
 
             // Stop DVI — Core 1 will be locked out during flash
             // (multicore_lockout_start_blocking requires Core 1 to be in lockout handler)
