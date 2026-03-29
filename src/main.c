@@ -60,7 +60,7 @@
 #define TEXT_X       (IMG_X + IMG_MAX_W + MARGIN)
 #define TEXT_Y       MARGIN
 #define TEXT_W       (SCREEN_W - TEXT_X - MARGIN)
-#define HINT_Y       (SCREEN_H - 20)
+#define HINT_Y       (SCREEN_H - 30)
 #define DESC_Y       (IMG_Y + IMG_MAX_H + 10)
 
 // Font: 5x7 bitmap (6px advance)
@@ -583,6 +583,7 @@ static void render_entry(int idx) {
     char hint[64];
     snprintf(hint, sizeof(hint), "< LEFT   %d / %d   RIGHT >", selected + 1, entry_count);
     fb_text_center(HINT_Y, hint, COL_HINT);
+    fb_text_center(HINT_Y + LINE_H, "Enter / Start to flash", COL_HINT);
 }
 
 // ============================================================================
@@ -822,6 +823,9 @@ static void animate_welcome(void) {
     for (int i = 1; i <= PCB_PAL_COUNT; i++)
         palette_set(PCB_PAL_BASE + i - 1, pcb_palette[i]);
 
+    // Preserve UI colors used by overlays (COL_WHITE=1 is below tunnel range)
+    palette_set(COL_HINT, 0x666666);
+
     // Layout: PCB (3x) on top, FRANK (1x) below, vertically centered
     const int pcb_scale = 3;
     const int pcb_draw_w = PCB_W * pcb_scale;
@@ -863,6 +867,16 @@ static void animate_welcome(void) {
             }
         }
 
+    // Bottom credit lines (COL_HINT matches firmware selector legend)
+    {
+        char ver_line[64];
+        snprintf(ver_line, sizeof(ver_line),
+            "FRANK KICKSTART by Mikhail Matveev, v. %d.%02d",
+            FK_VERSION_MAJOR, FK_VERSION_MINOR);
+        fb_text_center(SCREEN_H - 20, ver_line, COL_HINT);
+        fb_text_center(SCREEN_H - 10, "https://github.com/rh1tech/frank-kickstart", COL_HINT);
+    }
+
     // Flush stale input
     nespad_read();
     ps2kbd_tick();
@@ -895,7 +909,7 @@ static void animate_welcome(void) {
 
             for (int x = 0; x < SCREEN_W; x++) {
                 int off = y * SCREEN_W + x;
-                if (framebuffer[off] == COL_WHITE || framebuffer[off] >= PCB_PAL_BASE)
+                if (framebuffer[off] == COL_WHITE || framebuffer[off] == COL_HINT || framebuffer[off] >= PCB_PAL_BASE)
                     continue;
 
                 int lx = x >> 1;
@@ -1016,10 +1030,9 @@ int main(void) {
     // (SPI and DVI are incompatible at 400 MHz — APB bus contention)
     printf("Mounting SD card...\n");
     FRESULT res = f_mount(&fs, "", 1);
-    if (res != FR_OK) {
+    bool sd_ok = (res == FR_OK);
+    if (!sd_ok) {
         printf("SD mount failed: %d\n", res);
-        memset(framebuffer, COL_BG, sizeof(framebuffer));
-        fb_text_center(SCREEN_H / 2, "SD Card Error", COL_WHITE);
         goto start_dvi;
     }
     printf("SD card mounted.\n");
@@ -1050,12 +1063,19 @@ start_dvi:
     // Animated tunnel welcome screen (~10s, skippable)
     animate_welcome();
 
-    // Blank during palette transition, then show firmware list
+    // Blank during palette transition, then show firmware list or error
     dvi_loading = true;
     memset(framebuffer, COL_BG, sizeof(framebuffer));
     setup_palette();
-    if (entry_count > 0)
+    if (!sd_ok) {
+        fb_text_center(SCREEN_H / 2 - 10, "SD Card Error", COL_WHITE);
+        fb_text_center(SCREEN_H / 2 + 4, "Insert SD card and reboot", COL_GRAY);
+    } else if (entry_count > 0) {
         render_entry(selected);
+    } else {
+        fb_text_center(SCREEN_H / 2 - 10, "No UF2 files found", COL_WHITE);
+        fb_text_center(SCREEN_H / 2 + 4, "Place .uf2 files in /kickstart", COL_GRAY);
+    }
     dvi_loading = false;
 
     // Main loop: handle input from gamepad, keyboard, and serial

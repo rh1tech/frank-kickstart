@@ -10,6 +10,20 @@ project(frank-kickstart C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 
+# Read version from version.txt (format: "MAJOR MINOR" e.g. "0 1" = v0.01)
+file(READ "${CMAKE_CURRENT_LIST_DIR}/version.txt" VERSION_CONTENT)
+string(STRIP "${VERSION_CONTENT}" VERSION_CONTENT)
+string(REPLACE " " ";" VERSION_LIST "${VERSION_CONTENT}")
+list(GET VERSION_LIST 0 FK_VERSION_MAJOR)
+list(GET VERSION_LIST 1 FK_VERSION_MINOR)
+string(LENGTH "${FK_VERSION_MINOR}" _minor_len)
+if(_minor_len LESS 2)
+    set(FIRMWARE_VERSION "v${FK_VERSION_MAJOR}.0${FK_VERSION_MINOR}")
+else()
+    set(FIRMWARE_VERSION "v${FK_VERSION_MAJOR}.${FK_VERSION_MINOR}")
+endif()
+message(STATUS "frank-kickstart version: ${FIRMWARE_VERSION}")
+
 pico_sdk_init()
 
 add_subdirectory(src/fatfs)
@@ -50,6 +64,8 @@ target_compile_definitions(frank-kickstart PRIVATE
     NESPAD_GPIO_CLK=20
     NESPAD_GPIO_LATCH=21
     NESPAD_GPIO_DATA=26
+    FK_VERSION_MAJOR=${FK_VERSION_MAJOR}
+    FK_VERSION_MINOR=${FK_VERSION_MINOR}
 )
 
 target_link_libraries(frank-kickstart
