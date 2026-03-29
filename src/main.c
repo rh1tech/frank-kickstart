@@ -623,7 +623,7 @@ static inline int __not_in_flash_func(memcmp32)(const uint32_t *p1, const uint32
     return 0;
 }
 
-static bool __not_in_flash_func(flash_uf2)(const char *path) {
+static bool __not_in_flash_func(flash_uf2)(const char *path, const char *filename) {
     FIL file;
     gpio_init(PICO_DEFAULT_LED_PIN);
     gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
@@ -638,6 +638,16 @@ static bool __not_in_flash_func(flash_uf2)(const char *path) {
 
     // Now lockout can work — DVI IRQ is no longer firing
     multicore_lockout_start_blocking();
+
+    // Save last-selected filename (safe now — DVI stopped, clock at 150 MHz)
+    {
+        FIL lf;
+        if (f_open(&lf, BASE_DIR "/.last", FA_WRITE | FA_CREATE_ALWAYS) == FR_OK) {
+            UINT bw;
+            f_write(&lf, filename, strlen(filename), &bw);
+            f_close(&lf);
+        }
+    }
 
     if (f_open(&file, path, FA_READ) != FR_OK) {
         multicore_lockout_end_blocking();
@@ -1081,9 +1091,7 @@ int main(void) {
     }
     printf("All data pre-loaded.\n");
 
-    // Restore previously selected firmware from SD card
-    // Also ensure .last exists — creating it during DVI (FA_CREATE_ALWAYS on a
-    // new file requires longer SPI transactions) can crash due to bus contention.
+    // Restore previously selected firmware from .last file on SD
     {
         FIL lf;
         if (entry_count > 0 && f_open(&lf, BASE_DIR "/.last", FA_READ) == FR_OK) {
@@ -1098,13 +1106,6 @@ int main(void) {
                     selected = i;
                     break;
                 }
-            }
-        } else if (entry_count > 0) {
-            // Create .last now (before DVI) so the launch path only overwrites
-            if (f_open(&lf, BASE_DIR "/.last", FA_WRITE | FA_CREATE_ALWAYS) == FR_OK) {
-                UINT bw;
-                f_write(&lf, entries[0].filename, strlen(entries[0].filename), &bw);
-                f_close(&lf);
             }
         }
     }
@@ -1246,19 +1247,6 @@ start_dvi:
         if ((pressed & 4) && entry_count > 0) {
             printf("Launching: %s\n", entries[selected].filename);
 
-            // Save last-selected filename (blank DVI to reduce bus contention)
-            dvi_loading = true;
-            {
-                FIL lf;
-                if (f_open(&lf, BASE_DIR "/.last", FA_WRITE | FA_CREATE_ALWAYS) == FR_OK) {
-                    UINT bw;
-                    f_write(&lf, entries[selected].filename,
-                            strlen(entries[selected].filename), &bw);
-                    f_close(&lf);
-                }
-            }
-            dvi_loading = false;
-
             // Build full path
             char path[MAX_PATH];
             snprintf(path, sizeof(path), BASE_DIR "/%s", entries[selected].filename);
@@ -1284,7 +1272,7 @@ start_dvi:
             // (multicore_lockout_start_blocking requires Core 1 to be in lockout handler)
 
             // Flash the UF2 (re-mounts SD, flashes, reboots)
-            flash_uf2(path);
+            flash_uf2(path, entries[selected].filename);
             // If we get here, flashing failed
             fb_text_center(SCREEN_H / 2 + 32, "Flash failed!", COL_WHITE);
         }
