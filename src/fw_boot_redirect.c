@@ -2,38 +2,41 @@
  * Frank-Kickstart — Boot redirect (from pico-launcher m1p2-uf2)
  *
  * Runs before main() via __attribute__((constructor)).
- * Checks SRAM magic and ZERO_BLOCK to decide: run firmware or frank-kickstart.
+ * Checks watchdog scratch regs and ZERO_BLOCK to decide: run firmware or frank-kickstart.
+ *
+ * Uses watchdog scratch registers instead of SRAM magic — SRAM near the top
+ * can be corrupted by the RP2350 boot ROM's stack during reboot (varies by
+ * firmware binary layout).
  */
 
 #include <stdint.h>
 #include "pico.h"
-#include "hardware/regs/m33.h"
+#include "hardware/watchdog.h"
 
 #define ZERO_BLOCK_OFFSET   ((16ul << 20) - (256ul << 10) - (4ul << 10))
 #define ZERO_BLOCK_ADDRESS  (XIP_BASE + ZERO_BLOCK_OFFSET)
 #define FLASH_MAGIC_OVER    0x3836d91au
-#define SRAM_MAGIC_BOOT     0x383da910u
-#define SRAM_MAGIC_UI       0x17F00FFFu
+#define SCRATCH_MAGIC_BOOT  0x383da910u
+#define SCRATCH_MAGIC_UI    0x17F00FFFu
 
-#define SRAM_TOP            (0x20000000 + (512 << 10))
+// scratch[0] = boot magic (SCRATCH_MAGIC_BOOT after flash, SCRATCH_MAGIC_UI for escape)
+// scratch[1-3] = reserved for debug
 
 __attribute__((constructor))
 static void before_main(void) {
-    volatile uint32_t *sram_ui   = (volatile uint32_t *)(SRAM_TOP - 4);
-    volatile uint32_t *sram_boot = (volatile uint32_t *)(SRAM_TOP - 8);
+    uint32_t magic = watchdog_hw->scratch[0];
 
     // If UI magic is set (e.g., from SELECT button), skip redirect
-    if (*sram_ui == SRAM_MAGIC_UI) {
-        *sram_ui = 0;
+    if (magic == SCRATCH_MAGIC_UI) {
+        watchdog_hw->scratch[0] = 0;
         return;  // run frank-kickstart
     }
 
     // If boot magic is set (from watchdog reboot after flash), jump to firmware
-    if (*sram_boot == SRAM_MAGIC_BOOT) {
-        *sram_boot = 0;
+    if (magic == SCRATCH_MAGIC_BOOT) {
+        watchdog_hw->scratch[0] = 0;
 
         if (((uint32_t *)ZERO_BLOCK_ADDRESS)[1023] == FLASH_MAGIC_OVER) {
-            // VTOR stays at 0x10000000 to preserve firmware IRQ vectors
             // Jump to firmware's original Reset from ZERO_BLOCK
             __asm volatile (
                 "ldr r0, =%[zb_addr]\n"

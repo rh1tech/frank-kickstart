@@ -26,6 +26,9 @@
 #include "board_config.h"
 #include "nespad.h"
 #include "ps2kbd_wrapper.h"
+#ifdef USB_HID_ENABLED
+#include "usbhid.h"
+#endif
 #include "dvi.h"
 #include "dvi_timing.h"
 #include "dvi_serialiser.h"
@@ -557,7 +560,12 @@ static void render_entry(int idx) {
 
     if (e->version[0]) { draw_label(TEXT_X, ty, "Version: ", e->version); ty += LINE_H; }
     if (e->author[0])  { draw_label(TEXT_X, ty, "Author: ", e->author); ty += LINE_H; }
-    if (e->website[0]) { draw_label(TEXT_X, ty, "Web: ", e->website); ty += LINE_H; }
+    if (e->website[0]) {
+        fb_text(TEXT_X, ty, "Web:", COL_GRAY);
+        ty += LINE_H;
+        int lines = fb_text_wrap(TEXT_X, ty, e->website, COL_VALUE, TEXT_W);
+        ty += lines * LINE_H;
+    }
 
     // Description below metadata (still to the right of image)
     if (e->description[0]) {
@@ -606,7 +614,8 @@ typedef struct {
 #define ZERO_BLOCK_OFFSET   ((16ul << 20) - (256ul << 10) - (4ul << 10))
 #define ZERO_BLOCK_ADDRESS  (XIP_BASE + ZERO_BLOCK_OFFSET)
 #define FLASH_MAGIC_OVER    0x3836d91au
-#define SRAM_MAGIC_BOOT     0x383da910u
+#define SCRATCH_MAGIC_BOOT  0x383da910u
+#define SCRATCH_MAGIC_UI    0x17F00FFFu
 
 static inline int __not_in_flash_func(memcmp32)(const uint32_t *p1, const uint32_t *p2, size_t len) {
     len >>= 2;
@@ -688,8 +697,8 @@ static bool __not_in_flash_func(flash_uf2)(const char *path) {
     gpio_put(PICO_DEFAULT_LED_PIN, false);
     f_close(&file);
 
-    // SRAM magic tells before_main() to jump to firmware on next boot
-    *(volatile uint32_t *)(0x20000000 + (512 << 10) - 8) = SRAM_MAGIC_BOOT;
+    // Watchdog scratch[0] tells before_main() to jump to firmware on next boot
+    watchdog_hw->scratch[0] = SCRATCH_MAGIC_BOOT;
     watchdog_enable(100, true);
     while (true) tight_loop_contents();
     return true;
@@ -881,11 +890,18 @@ static void animate_welcome(void) {
     nespad_read();
     ps2kbd_tick();
     ps2kbd_get_state();
+#ifdef USB_HID_ENABLED
+    usbhid_task();
+    usbhid_get_kbd_state();
+#endif
     while (getchar_timeout_us(0) >= 0) {}
     for (int w = 0; w < 60; w++) {
         sleep_ms(16);
         nespad_read();
         ps2kbd_tick();
+#ifdef USB_HID_ENABLED
+        usbhid_task();
+#endif
         if (!nespad_state && !ps2kbd_get_state()) break;
     }
 
@@ -894,8 +910,17 @@ static void animate_welcome(void) {
         nespad_read();
         ps2kbd_tick();
         uint16_t kbd = ps2kbd_get_state();
+#ifdef USB_HID_ENABLED
+        usbhid_task();
+        kbd |= usbhid_get_kbd_state();
+        usbhid_gamepad_state_t wgp;
+        usbhid_get_gamepad_state(&wgp);
+#endif
         int serial = getchar_timeout_us(0);
         if (nespad_state || kbd || serial >= 0) break;
+#ifdef USB_HID_ENABLED
+        if (wgp.connected && (wgp.dpad || wgp.buttons || wgp.axis_x < -64 || wgp.axis_x > 64 || wgp.axis_y < -64 || wgp.axis_y > 64)) break;
+#endif
 
         uint8_t time_a = (uint8_t)(frame * 2);
         uint8_t twist_phase = (uint8_t)(frame * 4);
@@ -1000,6 +1025,8 @@ int main(void) {
     printf("Frank-Kickstart - UF2 Launcher\n");
     printf("Clock: %lu MHz\n", clock_get_hz(clk_sys) / 1000000);
 
+    // Print flash debug info from previous boot (if any)
+
     // Detect PSRAM and allocate entries accordingly
 #if !PICO_RP2040
     has_psram = psram_detect();
@@ -1041,6 +1068,11 @@ int main(void) {
     ps2kbd_init();
     printf("PS/2 keyboard initialized (CLK=%d, DATA=%d)\n", PS2_PIN_CLK, PS2_PIN_DATA);
 
+#ifdef USB_HID_ENABLED
+    usbhid_init();
+    printf("USB HID host initialized\n");
+#endif
+
     // Scan for UF2 files and pre-load ALL metadata before DVI starts
     scan_entries();
     for (int i = 0; i < entry_count; i++) {
@@ -1049,7 +1081,31 @@ int main(void) {
     }
     printf("All data pre-loaded.\n");
 
+    // Restore previously selected firmware from SD card
+    {
+        FIL lf;
+        if (entry_count > 0 && f_open(&lf, BASE_DIR "/.last", FA_READ) == FR_OK) {
+            char last_name[64] = {0};
+            UINT br;
+            f_read(&lf, last_name, sizeof(last_name) - 1, &br);
+            f_close(&lf);
+            while (br > 0 && (last_name[br-1] == '\n' || last_name[br-1] == '\r' || last_name[br-1] == ' '))
+                last_name[--br] = 0;
+            for (int i = 0; i < entry_count; i++) {
+                if (strcmp(entries[i].filename, last_name) == 0) {
+                    selected = i;
+                    break;
+                }
+            }
+        }
+    }
+
 start_dvi:
+    // Ensure clean state before DVI — after firmware crash-back, SRAM is re-zeroed
+    // by crt0 but explicitly clear buffers used by Core 1 to avoid any glitches
+    memset(framebuffer, COL_BG, sizeof(framebuffer));
+    memset(scanline_rgb332, palette_rgb332[COL_BG], sizeof(scanline_rgb332));
+
     // Launch Core 1 for DVI — welcome screen shows immediately
     sem_init(&dvi_start_sem, 0, 1);
     hw_set_bits(&bus_ctrl_hw->priority,
@@ -1096,18 +1152,42 @@ start_dvi:
         ps2kbd_tick();
         uint16_t kbd = ps2kbd_get_state();
 
+#ifdef USB_HID_ENABLED
+        usbhid_task();
+        kbd |= usbhid_get_kbd_state();  // Merge USB keyboard into kbd bitmask
+
+        usbhid_gamepad_state_t usbgp;
+        usbhid_get_gamepad_state(&usbgp);
+#endif
+
         // Combine into a unified input bitmask
         uint32_t input = 0;
+
+        // NES/SNES gamepad
         if (nespad_state & DPAD_LEFT)   input |= 1;
         if (nespad_state & DPAD_RIGHT)  input |= 2;
         if (nespad_state & DPAD_A)      input |= 4;
         if (nespad_state & DPAD_START)  input |= 4;
+
+        // PS/2 keyboard + USB keyboard (merged into kbd)
         if (kbd & KBD_STATE_LEFT)       input |= 1;
         if (kbd & KBD_STATE_RIGHT)      input |= 2;
         if (kbd & KBD_STATE_A)          input |= 4;
         if (kbd & KBD_STATE_START)      input |= 4;
 
-        // USB serial fallback
+#ifdef USB_HID_ENABLED
+        // USB gamepad
+        if (usbgp.connected) {
+            if (usbgp.dpad & 0x04)         input |= 1;  // D-pad left
+            if (usbgp.dpad & 0x08)         input |= 2;  // D-pad right
+            if (usbgp.axis_x < -64)        input |= 1;  // Analog left
+            if (usbgp.axis_x > 64)         input |= 2;  // Analog right
+            if (usbgp.buttons & 0x01)      input |= 4;  // A button
+            if (usbgp.buttons & 0x40)      input |= 4;  // Start button
+        }
+#endif
+
+        // Serial fallback (UART when USB HID enabled, USB CDC otherwise)
         int c = getchar_timeout_us(0);
         if (c == 'l' || c == 'h') input |= 1;
         if (c == 'r')             input |= 2;
@@ -1157,15 +1237,37 @@ start_dvi:
         if ((pressed & 4) && entry_count > 0) {
             printf("Launching: %s\n", entries[selected].filename);
 
+            // Save last-selected filename (blank DVI to reduce bus contention)
+            dvi_loading = true;
+            {
+                FIL lf;
+                if (f_open(&lf, BASE_DIR "/.last", FA_WRITE | FA_CREATE_ALWAYS) == FR_OK) {
+                    UINT bw;
+                    f_write(&lf, entries[selected].filename,
+                            strlen(entries[selected].filename), &bw);
+                    f_close(&lf);
+                }
+            }
+            dvi_loading = false;
+
             // Build full path
             char path[MAX_PATH];
             snprintf(path, sizeof(path), BASE_DIR "/%s", entries[selected].filename);
 
-            // Show flashing message
+            // Show flashing message (5 lines, vertically centered)
             memset(framebuffer, COL_BG, sizeof(framebuffer));
-            fb_text_center(SCREEN_H / 2 - 10, "Flashing firmware...", COL_WHITE);
-            fb_text_center(SCREEN_H / 2 + 4, entries[selected].title, COL_TITLE);
-            fb_text_center(SCREEN_H / 2 + 18, "Do not power off!", COL_GRAY);
+            int fy = SCREEN_H / 2 - 3 * LINE_H;
+            fb_text_center(fy, "Flashing firmware:", COL_WHITE);
+            fy += LINE_H;
+            fy += LINE_H;  // empty line
+            fb_text_center(fy, entries[selected].title, COL_TITLE);
+            fy += LINE_H;
+            fy += LINE_H;  // empty line
+            fb_text_center(fy, "Do not power off!", COL_GRAY);
+            fy += LINE_H;
+            fb_text_center(fy, "It may take a long time.", COL_GRAY);
+            fy += LINE_H;
+            fb_text_center(fy, "Display is off when flashing.", COL_GRAY);
 
             sleep_ms(2000);  // Show message for 2 seconds
 

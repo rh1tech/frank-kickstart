@@ -26,6 +26,9 @@ message(STATUS "frank-kickstart version: ${FIRMWARE_VERSION}")
 
 pico_sdk_init()
 
+# USB HID host for gamepads and keyboards (uses native USB port)
+option(USB_HID_ENABLED "Enable USB HID host for gamepads and keyboards" ON)
+
 add_subdirectory(src/fatfs)
 add_subdirectory(drivers/sdcard)
 add_subdirectory(drivers/nespad)
@@ -66,6 +69,7 @@ target_compile_definitions(frank-kickstart PRIVATE
     NESPAD_GPIO_DATA=26
     FK_VERSION_MAJOR=${FK_VERSION_MAJOR}
     FK_VERSION_MINOR=${FK_VERSION_MINOR}
+    PICO_STDIO_USB_CONNECT_WAIT_TIMEOUT_MS=0
 )
 
 target_link_libraries(frank-kickstart
@@ -88,7 +92,11 @@ target_link_libraries(frank-kickstart
     usbhid
 )
 
-pico_enable_stdio_uart(frank-kickstart 0)
-pico_enable_stdio_usb(frank-kickstart 1)
+pico_enable_stdio_uart(frank-kickstart 1)
+if(USB_HID_ENABLED)
+    pico_enable_stdio_usb(frank-kickstart 0)
+else()
+    pico_enable_stdio_usb(frank-kickstart 1)
+endif()
 
 pico_add_extra_outputs(frank-kickstart)
