@@ -31,6 +31,9 @@
 #include "common_dvi_pin_configs.h"
 #include "tmds_encode.h"
 #include "ff.h"
+#if !PICO_RP2040
+#include "psram_init.h"
+#endif
 
 // ============================================================================
 // Configuration
@@ -40,7 +43,9 @@
 #define SCREEN_H 300
 #define DVI_TIMING dvi_timing_800x600p_60hz
 #define BASE_DIR "/kickstart"
-#define MAX_ENTRIES 16
+#define MAX_ENTRIES_SRAM  16
+#define MAX_ENTRIES_PSRAM 128
+#define PSRAM_BASE        ((uint8_t *)(intptr_t)0x11000000)
 #define MAX_PATH 128
 #define MAX_TEXT 512
 
@@ -278,9 +283,25 @@ typedef struct {
     uint8_t *bmp_pixels;     // allocated, bmp_w * bmp_h bytes (palette indices)
 } uf2_entry_t;
 
-static uf2_entry_t entries[MAX_ENTRIES];
+static uf2_entry_t entries_sram[MAX_ENTRIES_SRAM];  // fallback when no PSRAM
+static uf2_entry_t *entries = entries_sram;
+static int max_entries = MAX_ENTRIES_SRAM;
 static int entry_count = 0;
 static int selected = 0;
+static bool has_psram = false;
+
+// Simple PSRAM bump allocator (entries array sits at PSRAM_BASE, allocs follow)
+static size_t psram_alloc_offset = 0;
+#define PSRAM_SIZE (8 * 1024 * 1024)
+
+static void *psram_malloc(size_t size) {
+    if (!has_psram) return malloc(size);
+    size = (size + 3) & ~3;  // align to 4 bytes
+    if (psram_alloc_offset + size > PSRAM_SIZE) return NULL;
+    void *ptr = PSRAM_BASE + psram_alloc_offset;
+    psram_alloc_offset += size;
+    return ptr;
+}
 
 // Temporary BMP pixel buffer for loading (copied to malloc'd per-entry storage)
 static uint8_t bmp_pixel_buf[200 * 200];
@@ -377,7 +398,7 @@ static bool load_entry_bmp(uf2_entry_t *e, const char *path) {
     }
     f_close(&file);
 
-    e->bmp_pixels = (uint8_t *)malloc(bmp_w * bmp_h);
+    e->bmp_pixels = (uint8_t *)psram_malloc(bmp_w * bmp_h);
     if (!e->bmp_pixels) return false;
     memcpy(e->bmp_pixels, bmp_pixel_buf, bmp_w * bmp_h);
     e->has_bmp = true;
@@ -398,7 +419,7 @@ static void scan_entries(void) {
     }
 
     entry_count = 0;
-    while (entry_count < MAX_ENTRIES) {
+    while (entry_count < max_entries) {
         if (f_readdir(&dir, &fno) != FR_OK || fno.fname[0] == '\0') break;
         if (fno.fattrib & AM_DIR) continue;
 
@@ -745,6 +766,32 @@ void __not_in_flash_func(core1_main)(void) {
 }
 
 // ============================================================================
+// PSRAM detection
+// ============================================================================
+
+#if !PICO_RP2040
+static bool psram_detect(void) {
+    uint cs_pin = get_psram_pin();
+    psram_init(cs_pin);
+
+    // Write test pattern and read back to verify PSRAM is present
+    volatile uint8_t *psram = (volatile uint8_t *)PSRAM_BASE;
+    psram[0] = 0xA5;
+    psram[1] = 0x5A;
+    psram[2] = 0x42;
+    if (psram[0] != 0xA5 || psram[1] != 0x5A || psram[2] != 0x42)
+        return false;
+
+    // Second pattern to rule out bus floating
+    psram[0] = 0x00;
+    if (psram[0] != 0x00)
+        return false;
+
+    return true;
+}
+#endif
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -770,6 +817,23 @@ int main(void) {
 
     printf("Frank-Kickstart - UF2 Launcher\n");
     printf("Clock: %lu MHz\n", clock_get_hz(clk_sys) / 1000000);
+
+    // Detect PSRAM and allocate entries accordingly
+#if !PICO_RP2040
+    has_psram = psram_detect();
+    if (has_psram) {
+        entries = (uf2_entry_t *)PSRAM_BASE;
+        max_entries = MAX_ENTRIES_PSRAM;
+        // Reserve space for entries array, bump allocator starts after
+        psram_alloc_offset = sizeof(uf2_entry_t) * MAX_ENTRIES_PSRAM;
+        psram_alloc_offset = (psram_alloc_offset + 3) & ~3;
+        printf("PSRAM detected - %d entry slots available\n", max_entries);
+    } else {
+        printf("No PSRAM - using SRAM (%d entry slots)\n", max_entries);
+    }
+#else
+    printf("RP2040 - using SRAM (%d entry slots)\n", max_entries);
+#endif
 
     // Setup palette and clear
     setup_palette();

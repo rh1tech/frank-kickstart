@@ -22,6 +22,7 @@ add_subdirectory(drivers/libdvi)
 add_executable(frank-kickstart
     src/main.c
     src/fw_boot_redirect.c
+    src/psram_init.c
 )
 
 # Custom linker script: frank-kickstart at 0x10F00000, firmware area at 0x10000000
