@@ -34,6 +34,7 @@
 #if !PICO_RP2040
 #include "psram_init.h"
 #endif
+#include "welcome_data.h"
 
 // ============================================================================
 // Configuration
@@ -766,6 +767,59 @@ void __not_in_flash_func(core1_main)(void) {
 }
 
 // ============================================================================
+// Welcome screen
+// ============================================================================
+
+// Welcome palette uses indices 16+ (same range as BMP palettes)
+#define WELCOME_PAL_BASE 16
+
+static void render_welcome(void) {
+    memset(framebuffer, COL_BG, sizeof(framebuffer));
+
+    // Load PCB palette into screen palette
+    for (int i = 1; i < 14; i++)  // skip index 0 (transparent)
+        palette_set(WELCOME_PAL_BASE + i, pcb_palette[i]);
+
+    // Draw PCB at 3x scale, centered horizontally
+    int pcb_scale = 3;
+    int pcb_draw_w = PCB_W * pcb_scale;
+    int pcb_draw_h = PCB_H * pcb_scale;
+    // Vertically center: PCB + gap + FRANK
+    int gap = 16;
+    int total_h = pcb_draw_h + gap + FRANK_H;
+    int pcb_ox = (SCREEN_W - pcb_draw_w) / 2;
+    int pcb_oy = (SCREEN_H - total_h) / 2;
+
+    for (int y = 0; y < PCB_H; y++) {
+        for (int x = 0; x < PCB_W; x++) {
+            uint8_t pi = pcb_pixels[y * PCB_W + x];
+            if (pi == 0) continue;  // transparent
+            uint8_t ci = WELCOME_PAL_BASE + pi;
+            for (int sy = 0; sy < pcb_scale; sy++)
+                for (int sx = 0; sx < pcb_scale; sx++)
+                    fb_pixel(pcb_ox + x * pcb_scale + sx,
+                             pcb_oy + y * pcb_scale + sy, ci);
+        }
+    }
+
+    // Draw FRANK text at 1x (native pixel art), centered, below PCB
+    int frank_ox = (SCREEN_W - FRANK_W) / 2;
+    int frank_oy = pcb_oy + pcb_draw_h + gap;
+
+    for (int y = 0; y < FRANK_H; y++) {
+        for (int bx = 0; bx < FRANK_BPR; bx++) {
+            uint8_t byte = frank_bitmap[y * FRANK_BPR + bx];
+            for (int bit = 0; bit < 8; bit++) {
+                int px = bx * 8 + bit;
+                if (px >= FRANK_W) break;
+                if (!(byte & (0x80 >> bit))) continue;
+                fb_pixel(frank_ox + px, frank_oy + y, COL_WHITE);
+            }
+        }
+    }
+}
+
+// ============================================================================
 // PSRAM detection
 // ============================================================================
 
@@ -810,11 +864,6 @@ int main(void) {
 
     // Boot redirect handled by before_main() constructor in fw_boot_redirect.c
 
-    for (int i = 3; i > 0; i--) {
-        printf("Starting in %d...\n", i);
-        sleep_ms(1000);
-    }
-
     printf("Frank-Kickstart - UF2 Launcher\n");
     printf("Clock: %lu MHz\n", clock_get_hz(clk_sys) / 1000000);
 
@@ -835,20 +884,22 @@ int main(void) {
     printf("RP2040 - using SRAM (%d entry slots)\n", max_entries);
 #endif
 
-    // Setup palette and clear
+    // Setup palette and render welcome screen into framebuffer
     setup_palette();
-    memset(framebuffer, COL_BG, sizeof(framebuffer));
+    render_welcome();
 
-    // Init DVI
+    // Init DVI (but don't start yet — need SD first)
     dvi0.timing = &DVI_TIMING;
     dvi0.ser_cfg = DVI_DEFAULT_SERIAL_CONFIG;
     dvi_init(&dvi0, next_striped_spin_lock_num(), next_striped_spin_lock_num());
 
-    // Mount SD
+    // Mount SD and load all data BEFORE starting DVI
+    // (SPI and DVI are incompatible at 400 MHz — APB bus contention)
     printf("Mounting SD card...\n");
     FRESULT res = f_mount(&fs, "", 1);
     if (res != FR_OK) {
         printf("SD mount failed: %d\n", res);
+        memset(framebuffer, COL_BG, sizeof(framebuffer));
         fb_text_center(SCREEN_H / 2, "SD Card Error", COL_WHITE);
         goto start_dvi;
     }
@@ -859,21 +910,15 @@ int main(void) {
     printf("PS/2 keyboard initialized (CLK=%d, DATA=%d)\n", PS2_PIN_CLK, PS2_PIN_DATA);
 
     // Scan for UF2 files and pre-load ALL metadata before DVI starts
-    // (SPI access is incompatible with PicoDVI at 400 MHz)
     scan_entries();
     for (int i = 0; i < entry_count; i++) {
         load_entry_metadata(i);
         printf("  [%d/%d] %s\n", i + 1, entry_count, entries[i].title);
     }
-
-    // SD stays mounted for firmware flashing later
     printf("All data pre-loaded.\n");
 
-    // Render initial screen
-    render_entry(selected);
-
 start_dvi:
-    // Launch Core 1 for DVI
+    // Launch Core 1 for DVI — welcome screen shows immediately
     sem_init(&dvi_start_sem, 0, 1);
     hw_set_bits(&bus_ctrl_hw->priority,
         BUSCTRL_BUS_PRIORITY_PROC1_BITS |   // Core 1 CPU priority
@@ -881,7 +926,12 @@ start_dvi:
         BUSCTRL_BUS_PRIORITY_DMA_W_BITS);   // DMA write priority
     multicore_launch_core1(core1_main);
     sem_release(&dvi_start_sem);
-    printf("DVI started.\n");
+    printf("DVI started (welcome screen).\n");
+
+    // Show welcome screen for 2 seconds, then switch to firmware list
+    sleep_ms(2000);
+    if (entry_count > 0)
+        render_entry(selected);
 
     // Main loop: handle input from gamepad, keyboard, and serial
     uint32_t repeat_timer = 0;
