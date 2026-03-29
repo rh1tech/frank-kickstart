@@ -639,6 +639,9 @@ static bool __not_in_flash_func(flash_uf2)(const char *path, const char *filenam
     // Now lockout can work — DVI IRQ is no longer firing
     multicore_lockout_start_blocking();
 
+    // Re-mount SD (was unmounted before DVI started)
+    f_mount(&fs, "", 1);
+
     // Save last-selected filename (safe now — DVI stopped, clock at 150 MHz)
     {
         FIL lf;
@@ -1109,6 +1112,11 @@ int main(void) {
             }
         }
     }
+
+    // Unmount SD before starting DVI — SPI peripheral state interferes with
+    // DVI at 400 MHz even when no transfers are active. Re-mount in flash_uf2().
+    f_unmount("");
+    printf("SD unmounted.\n");
 
 start_dvi:
     // Ensure clean state before DVI — after firmware crash-back, SRAM is re-zeroed
