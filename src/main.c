@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <math.h>
 #include "pico/stdlib.h"
 #include "pico/multicore.h"
 #include "pico/sem.h"
@@ -767,56 +768,174 @@ void __not_in_flash_func(core1_main)(void) {
 }
 
 // ============================================================================
-// Welcome screen
+// Welcome screen — animated 3D tunnel effect
 // ============================================================================
 
-// Welcome palette uses indices 16+ (same range as BMP palettes)
-#define WELCOME_PAL_BASE 16
+// Palette: 2..241 = tunnel (240 colors), 242..254 = PCB (13 colors)
+// During welcome, only COL_BG(0) and COL_WHITE(1) needed from UI
+#define TUNNEL_PAL_BASE  2
+#define TUNNEL_PAL_SIZE  240
+#define PCB_PAL_BASE     242
+#define PCB_PAL_COUNT    13
 
-static void render_welcome(void) {
-    memset(framebuffer, COL_BG, sizeof(framebuffer));
+// Half-resolution tunnel LUT
+#define TW (SCREEN_W / 2)
+#define TH (SCREEN_H / 2)
 
-    // Load PCB palette into screen palette
-    for (int i = 1; i < 14; i++)  // skip index 0 (transparent)
-        palette_set(WELCOME_PAL_BASE + i, pcb_palette[i]);
+static uint8_t *t_angle = NULL;
+static uint8_t *t_depth = NULL;
 
-    // Draw PCB at 3x scale, centered horizontally
-    int pcb_scale = 3;
-    int pcb_draw_w = PCB_W * pcb_scale;
-    int pcb_draw_h = PCB_H * pcb_scale;
-    // Vertically center: PCB + gap + FRANK
-    int gap = 16;
-    int total_h = pcb_draw_h + gap + FRANK_H;
-    int pcb_ox = (SCREEN_W - pcb_draw_w) / 2;
-    int pcb_oy = (SCREEN_H - total_h) / 2;
+// Call BEFORE DVI starts — heavy float math without bus contention
+static void prepare_tunnel(void) {
+    t_angle = (uint8_t *)malloc(TW * TH);
+    t_depth = (uint8_t *)malloc(TW * TH);
+    if (!t_angle || !t_depth) return;
 
-    for (int y = 0; y < PCB_H; y++) {
-        for (int x = 0; x < PCB_W; x++) {
-            uint8_t pi = pcb_pixels[y * PCB_W + x];
-            if (pi == 0) continue;  // transparent
-            uint8_t ci = WELCOME_PAL_BASE + pi;
-            for (int sy = 0; sy < pcb_scale; sy++)
-                for (int sx = 0; sx < pcb_scale; sx++)
-                    fb_pixel(pcb_ox + x * pcb_scale + sx,
-                             pcb_oy + y * pcb_scale + sy, ci);
+    const float cx = TW * 0.5f, cy = TH * 0.5f;
+    for (int y = 0; y < TH; y++) {
+        for (int x = 0; x < TW; x++) {
+            float dx = (float)x - cx, dy = (float)y - cy;
+            float dist = sqrtf(dx * dx + dy * dy);
+            float angle = atan2f(dy, dx);
+            t_angle[y * TW + x] = (uint8_t)(int)(angle * (128.0f / 3.14159265f));
+            t_depth[y * TW + x] = (dist < 1.0f) ? 255
+                : (uint8_t)fminf(3500.0f / dist, 255.0f);
         }
     }
+}
 
-    // Draw FRANK text at 1x (native pixel art), centered, below PCB
-    int frank_ox = (SCREEN_W - FRANK_W) / 2;
-    int frank_oy = pcb_oy + pcb_draw_h + gap;
+// Call AFTER DVI starts — integer-only, safe for bus sharing with DVI
+static void animate_welcome(void) {
+    if (!t_angle || !t_depth) {
+        sleep_ms(2500);
+        return;
+    }
 
-    for (int y = 0; y < FRANK_H; y++) {
+    // Tunnel palette: greyscale, B+16 to reduce yellow tint from RGB332
+    for (int i = 0; i < TUNNEL_PAL_SIZE; i++) {
+        int v = (i * 120) / (TUNNEL_PAL_SIZE - 1);
+        int b = v + 16; if (b > 255) b = 255;
+        palette_set(TUNNEL_PAL_BASE + i, (v << 16) | (v << 8) | b);
+    }
+
+    // PCB palette (13 opaque colors from pcb_palette[1..13])
+    for (int i = 1; i <= PCB_PAL_COUNT; i++)
+        palette_set(PCB_PAL_BASE + i - 1, pcb_palette[i]);
+
+    // Layout: PCB (3x) on top, FRANK (1x) below, vertically centered
+    const int pcb_scale = 3;
+    const int pcb_draw_w = PCB_W * pcb_scale;
+    const int pcb_draw_h = PCB_H * pcb_scale;
+    const int gap = 16;
+    const int total_h = pcb_draw_h + gap + FRANK_H;
+    const int pcb_ox = (SCREEN_W - pcb_draw_w) / 2;
+    const int pcb_oy = (SCREEN_H - total_h) / 2;
+    const int frank_ox = (SCREEN_W - FRANK_W) / 2;
+    const int frank_oy = pcb_oy + pcb_draw_h + gap;
+
+    // Sine LUT for twist distortion
+    int8_t twist_lut[256];
+    for (int i = 0; i < 256; i++)
+        twist_lut[i] = (int8_t)(24.0f * sinf(i * 2.0f * 3.14159265f / 256.0f));
+
+    // Draw overlays ONCE — tunnel will skip these pixels
+    memset(framebuffer, COL_BG, sizeof(framebuffer));
+
+    for (int y = 0; y < PCB_H; y++)
+        for (int x = 0; x < PCB_W; x++) {
+            uint8_t pi = pcb_pixels[y * PCB_W + x];
+            if (pi == 0) continue;
+            uint8_t ci = PCB_PAL_BASE + pi - 1;  // pi is 1-13, map to PCB_PAL_BASE+0..12
+            for (int dy = 0; dy < pcb_scale; dy++)
+                for (int dx = 0; dx < pcb_scale; dx++)
+                    fb_pixel(pcb_ox + x * pcb_scale + dx,
+                             pcb_oy + y * pcb_scale + dy, ci);
+        }
+
+    for (int y = 0; y < FRANK_H; y++)
         for (int bx = 0; bx < FRANK_BPR; bx++) {
             uint8_t byte = frank_bitmap[y * FRANK_BPR + bx];
             for (int bit = 0; bit < 8; bit++) {
                 int px = bx * 8 + bit;
                 if (px >= FRANK_W) break;
-                if (!(byte & (0x80 >> bit))) continue;
-                fb_pixel(frank_ox + px, frank_oy + y, COL_WHITE);
+                if (byte & (0x80 >> bit))
+                    fb_pixel(frank_ox + px, frank_oy + y, COL_WHITE);
             }
         }
+
+    // Flush stale input
+    nespad_read();
+    ps2kbd_tick();
+    ps2kbd_get_state();
+    while (getchar_timeout_us(0) >= 0) {}
+    for (int w = 0; w < 60; w++) {
+        sleep_ms(16);
+        nespad_read();
+        ps2kbd_tick();
+        if (!nespad_state && !ps2kbd_get_state()) break;
     }
+
+    // Animate for ~10 seconds at ~30fps, skippable
+    for (int frame = 0; frame < 300; frame++) {
+        nespad_read();
+        ps2kbd_tick();
+        uint16_t kbd = ps2kbd_get_state();
+        int serial = getchar_timeout_us(0);
+        if (nespad_state || kbd || serial >= 0) break;
+
+        uint8_t time_a = (uint8_t)(frame * 2);
+        uint8_t twist_phase = (uint8_t)(frame * 4);
+
+        // Full 400x300 render with bilinear interpolation from half-res LUT
+        for (int y = 0; y < SCREEN_H; y++) {
+            int ly = y >> 1;
+            int fy = y & 1;
+            int ly1 = ly < TH - 1 ? ly + 1 : ly;
+            uint8_t row_twist = twist_lut[(uint8_t)(y + twist_phase)];
+
+            for (int x = 0; x < SCREEN_W; x++) {
+                int off = y * SCREEN_W + x;
+                if (framebuffer[off] == COL_WHITE || framebuffer[off] >= PCB_PAL_BASE)
+                    continue;
+
+                int lx = x >> 1;
+                int fx = x & 1;
+                int lx1 = lx < TW - 1 ? lx + 1 : lx;
+
+                int i00 = ly * TW + lx, i10 = ly * TW + lx1;
+                int i01 = ly1 * TW + lx, i11 = ly1 * TW + lx1;
+
+                // Bilinear depth for smooth gradient
+                int d;
+                if (!fx && !fy)      d = t_depth[i00];
+                else if (fx && !fy)  d = (t_depth[i00] + t_depth[i10] + 1) >> 1;
+                else if (!fx)        d = (t_depth[i00] + t_depth[i01] + 1) >> 1;
+                else                 d = (t_depth[i00] + t_depth[i10] + t_depth[i01] + t_depth[i11] + 2) >> 2;
+
+                uint8_t a = t_angle[i00] + time_a + row_twist;
+
+                // Depth drives brightness (center=bright, edge=dark), no wrapping
+                // Angle rotation + twist provides all animation
+                int tex = d + (int)(a >> 3);
+                if (tex > 255) tex = 255;
+
+                // 2x2 Bayer ordered dithering: 4 offsets per block smooth out
+                // RGB332 quantization and cancel alternating yellow/blue tint
+                static const int bayer[4] = { -24, -8, 8, 24 };
+                int tex_d = tex + bayer[((y & 1) << 1) | (x & 1)];
+                if (tex_d < 0) tex_d = 0;
+                if (tex_d > 255) tex_d = 255;
+                framebuffer[off] = TUNNEL_PAL_BASE + ((tex_d * (TUNNEL_PAL_SIZE - 1)) >> 8);
+            }
+        }
+
+        sleep_ms(33);
+    }
+
+    free(t_angle);
+    free(t_depth);
+    t_angle = NULL;
+    t_depth = NULL;
 }
 
 // ============================================================================
@@ -884,9 +1003,9 @@ int main(void) {
     printf("RP2040 - using SRAM (%d entry slots)\n", max_entries);
 #endif
 
-    // Setup palette and render welcome screen into framebuffer
+    // Setup palette and precompute tunnel LUTs (heavy float, before DVI)
     setup_palette();
-    render_welcome();
+    prepare_tunnel();
 
     // Init DVI (but don't start yet — need SD first)
     dvi0.timing = &DVI_TIMING;
@@ -928,10 +1047,16 @@ start_dvi:
     sem_release(&dvi_start_sem);
     printf("DVI started (welcome screen).\n");
 
-    // Show welcome screen for 2.5 seconds, then switch to firmware list
-    sleep_ms(2500);
+    // Animated tunnel welcome screen (~10s, skippable)
+    animate_welcome();
+
+    // Blank during palette transition, then show firmware list
+    dvi_loading = true;
+    memset(framebuffer, COL_BG, sizeof(framebuffer));
+    setup_palette();
     if (entry_count > 0)
         render_entry(selected);
+    dvi_loading = false;
 
     // Main loop: handle input from gamepad, keyboard, and serial
     uint32_t repeat_timer = 0;
