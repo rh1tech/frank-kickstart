@@ -4,5 +4,5 @@
   <author>Mikhail Matveev</author>
   <website>https://github.com/rh1tech/frank-digger</website>
   <description>Digger, the beloved 1983 arcade-style game by Windmill Software, ported to RP2350. Originally an IBM PC exclusive, Digger has you digging tunnels through dirt to collect emeralds while avoiding Nobbins and Hobbins. Often compared to Dig Dug and Mr. Do, it became a cult classic of the early PC gaming era. Features authentic CGA 4-color graphics and two-player support. Runs bare-metal on RP2350 with HDMI output and I2S audio. Based on Andrew Jenner's 1998 Digger Remastered reverse-engineering.</description>
-  <controls>PS/2 or USB keyboard. Arrows: move, Space: fire. F1: 1P start, F2: 2P start. F7: sound, F9: music.</controls>
+  <controls>PS/2 or USB keyboard. Arrows: move, F1: fire. F7: sound, F9: music.</controls>
 </firmware>

@@ -1,8 +1,0 @@
-<firmware>
-  <title>Prince of Persia</title>
-  <version>1.04</version>
-  <author>Mikhail Matveev, DnCraptor</author>
-  <website>https://github.com/rh1tech/frank-prince</website>
-  <description>Prince of Persia, the groundbreaking 1989 cinematic platformer by Jordan Mechner, ported to RP2350. Famous for its rotoscoped animation that brought unprecedented fluidity to character movement, it set the standard for the entire genre. You have 60 minutes to escape the dungeon, defeat Jaffar's guards in swordfights, and rescue the Princess. The game inspired countless successors including Tomb Raider and Assassin's Creed. Features 320x200 HDMI output with I2S audio. Based on SDLPoP, the open-source port by David Nagy.</description>
-  <controls>PS/2 or USB keyboard: arrows to move, Shift to walk/pick up, Up to jump, Space: show time. Ctrl+A: restart.</controls>
-</firmware>

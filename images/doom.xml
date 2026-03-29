@@ -1,8 +1,0 @@
-<firmware>
-  <title>DOOM</title>
-  <version>1.12</version>
-  <author>Mikhail Matveev</author>
-  <website>https://github.com/rh1tech/frank-doom</website>
-  <description>DOOM, the genre-defining 1993 first-person shooter by id Software, ported to RP2350. Created by John Carmack and John Romero, DOOM revolutionized gaming with its fast-paced action, networked multiplayer, and modding community. Fight through hordes of demons across Phobos, Deimos, and Hell itself. Features 320x240 HDMI output with full OPL2 music emulation for that authentic AdLib soundtrack. Loads WAD files from SD card -- supports DOOM, DOOM II, Plutonia, TNT, and custom WADs. Based on Chocolate Doom and doomgeneric.</description>
-  <controls>Keyboard: arrows/Ctrl/Space/Shift. Mouse: move+buttons. PS/2 and USB supported.</controls>
-</firmware>

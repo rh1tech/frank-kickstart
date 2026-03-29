@@ -1,7 +1,7 @@
 #!/bin/bash
-# Convert all PNG images in ./images to 100x150 8-bit indexed BMP
+# Convert all PNG images in ./firmware to 100x150 8-bit indexed BMP
 
-IMGDIR="./images"
+IMGDIR="./sdcard/kickstart"
 COUNT=0
 
 for png in "$IMGDIR"/*.png; do

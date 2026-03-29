@@ -13,3 +13,7 @@ third_party/
 
 # OS
 .DS_Store
+
+# Firmware
+
+sdcard/kickstart/*.uf2
