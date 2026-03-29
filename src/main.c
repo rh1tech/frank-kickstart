@@ -1082,6 +1082,8 @@ int main(void) {
     printf("All data pre-loaded.\n");
 
     // Restore previously selected firmware from SD card
+    // Also ensure .last exists — creating it during DVI (FA_CREATE_ALWAYS on a
+    // new file requires longer SPI transactions) can crash due to bus contention.
     {
         FIL lf;
         if (entry_count > 0 && f_open(&lf, BASE_DIR "/.last", FA_READ) == FR_OK) {
@@ -1096,6 +1098,13 @@ int main(void) {
                     selected = i;
                     break;
                 }
+            }
+        } else if (entry_count > 0) {
+            // Create .last now (before DVI) so the launch path only overwrites
+            if (f_open(&lf, BASE_DIR "/.last", FA_WRITE | FA_CREATE_ALWAYS) == FR_OK) {
+                UINT bw;
+                f_write(&lf, entries[0].filename, strlen(entries[0].filename), &bw);
+                f_close(&lf);
             }
         }
     }
