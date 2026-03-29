@@ -928,8 +928,8 @@ start_dvi:
     sem_release(&dvi_start_sem);
     printf("DVI started (welcome screen).\n");
 
-    // Show welcome screen for 2 seconds, then switch to firmware list
-    sleep_ms(2000);
+    // Show welcome screen for 2.5 seconds, then switch to firmware list
+    sleep_ms(2500);
     if (entry_count > 0)
         render_entry(selected);
 
