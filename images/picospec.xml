@@ -1,0 +1,8 @@
+<firmware>
+  <title>ZX Spectrum (pico-spec)</title>
+  <version>1.2.K</version>
+  <author>DnCraptor, drewpo28, CAHbKA-IV</author>
+  <website>https://github.com/DnCraptor/pico-spec</website>
+  <description>ZX Spectrum emulator based on ESPectrum, ported to RP2040/RP2350. The Spectrum launched in 1982 and became the heart of British home computing, inspiring a massive library of games and a vibrant demoscene. Features 100% cycle-accurate Z80 emulation of 48K, 128K, Pentagon, Byte, and ALF models. Includes AY-3-8912, TurboSound, SAA1099 sound chips, and MIDI support with built-in software synth. Supports Betadisk, esxDOS, and all major file formats: TAP, TZX, SNA, Z80, TRD, SCL.</description>
+  <controls>PS/2 or USB keyboard. NES/Xbox gamepad (Kempston). F1: menu, F5: load file, F6: play tape, F11: hard reset.</controls>
+</firmware>

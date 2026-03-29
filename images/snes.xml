@@ -1,0 +1,8 @@
+<firmware>
+  <title>SNES</title>
+  <version>1.04</version>
+  <author>Mikhail Matveev</author>
+  <website>https://github.com/rh1tech/frank-snes</website>
+  <description>Super Nintendo Entertainment System emulator running on RP2350. The SNES, released in 1990, is widely regarded as one of the greatest consoles ever made. Home to masterpieces like Super Mario World, Chrono Trigger, The Legend of Zelda: A Link to the Past, and Super Metroid. Features 640x480 HDMI output with authentic SNES sound emulation and optional CRT scanline effects. Includes an SD card ROM browser with cover art and game information. Based on the Snes9x/snes9x2010 emulation core.</description>
+  <controls>SNES/NES/USB gamepad or keyboard (X/Z/S/A/Q/W/Enter/Space/arrows). Select+Start: settings menu.</controls>
+</firmware>

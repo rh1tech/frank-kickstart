@@ -42,7 +42,7 @@
 #define BASE_DIR "/kickstart"
 #define MAX_ENTRIES 16
 #define MAX_PATH 128
-#define MAX_TEXT 256
+#define MAX_TEXT 512
 
 // Layout constants
 #define MARGIN       16
@@ -820,8 +820,14 @@ start_dvi:
     printf("DVI started.\n");
 
     // Main loop: handle input from gamepad, keyboard, and serial
-    uint32_t prev_input = 0;
     uint32_t repeat_timer = 0;
+    uint32_t prev_input = 0;
+    bool input_armed = false;  // Don't accept actions until all inputs released once
+
+    // Wait for clean input state: all buttons must be released before we
+    // accept any presses. This prevents auto-launch after a flash-reboot
+    // cycle (held button or PS/2 boot noise).
+    printf("Waiting for input release...\n");
 
     while (1) {
         sleep_ms(16); // ~60 Hz poll rate
@@ -846,6 +852,20 @@ start_dvi:
         int c = getchar_timeout_us(0);
         if (c == 'l' || c == 'h') input |= 1;
         if (c == 'r')             input |= 2;
+
+        // Arm input after all buttons have been released at least once
+        if (!input_armed) {
+            if (input == 0) {
+                input_armed = true;
+                printf("Input armed (nespad=0x%lx kbd=0x%x)\n",
+                       (unsigned long)nespad_state, kbd);
+            } else {
+                printf("Input blocked: input=0x%lx nespad=0x%lx kbd=0x%x\n",
+                       (unsigned long)input, (unsigned long)nespad_state, kbd);
+                prev_input = input;
+                continue;
+            }
+        }
 
         // Edge detection with auto-repeat
         uint32_t pressed = input & ~prev_input; // newly pressed

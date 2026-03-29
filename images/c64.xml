@@ -1,0 +1,8 @@
+<firmware>
+  <title>Commodore 64</title>
+  <version>1.07</version>
+  <author>Mikhail Matveev, DnCraptor</author>
+  <website>https://github.com/rh1tech/frank-c64</website>
+  <description>Commodore 64 PAL emulator running on RP2350. The C64, released in 1982, is the best-selling single personal computer model of all time with over 17 million units sold. It defined an era of 8-bit home computing with its legendary SID sound chip and colorful VIC-II graphics. Famous for classics like Impossible Mission, Maniac Mansion, and The Last Ninja. Features full SID sound emulation and VICE-style keyboard mapping. Loads D64 and D81 disk images from SD card. Based on Frodo by Christian Bauer.</description>
+  <controls>PS/2 or USB keyboard (VICE layout). NES/SNES gamepad as joystick. F9: swap port, F10: disk UI, F11: RESTORE.</controls>
+</firmware>

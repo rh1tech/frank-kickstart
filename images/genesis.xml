@@ -1,0 +1,8 @@
+<firmware>
+  <title>Sega Genesis</title>
+  <version>1.01</version>
+  <author>Mikhail Matveev</author>
+  <website>https://github.com/rh1tech/frank-genesis</website>
+  <description>Sega Genesis / Mega Drive emulator running on RP2350. Released in 1988, the Genesis was Sega's flagship 16-bit console and a fierce rival to the SNES during the legendary console wars. Home to Sonic the Hedgehog, Streets of Rage, Phantasy Star, and hundreds of arcade-quality titles. Features full YM2612 FM synthesis and SN76489 PSG sound emulation for authentic audio. Supports both 3-button and 6-button controller modes with NES, SNES, and USB gamepads. Based on the Gwenesis emulator core.</description>
+  <controls>NES gamepad: D-pad/A/B, A+B=C. SNES: full 6-button. Keyboard: arrows/A/S/D/Q/W/E. Select+Start: settings.</controls>
+</firmware>

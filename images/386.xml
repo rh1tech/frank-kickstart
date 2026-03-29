@@ -1,0 +1,8 @@
+<firmware>
+  <title>386 PC</title>
+  <version>1.04</version>
+  <author>Mikhail Matveev, DnCraptor</author>
+  <website>https://github.com/rh1tech/frank-386</website>
+  <description>Full i386 PC emulator running on RP2350 with up to 8MB RAM via PSRAM. Boots MS-DOS, Windows 3.x, Windows 95, and even Linux. The IBM PC/AT architecture defined personal computing in the 1980s and 90s, running thousands of classic DOS games and productivity software. Features Sound Blaster 16, AdLib OPL2, PC Speaker, Tandy, and Covox audio emulation. Includes a runtime disk manager for hot-swapping floppy, hard disk, and CD-ROM images from SD card. Based on Tiny386 by Chunhui He.</description>
+  <controls>PS/2 or USB keyboard+mouse. NES gamepad (mouse emulation). Win+F11: settings, Win+F12: disk manager</controls>
+</firmware>

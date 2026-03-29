@@ -1,8 +1,8 @@
 <firmware>
   <title>Heretic</title>
-  <version>1.01</version>
+  <version>1.03</version>
   <author>Mikhail Matveev</author>
-  <website>https://github.com/rh1tech/murmheretic</website>
-  <description>Heretic game engine port for RP2350. Runs the classic 1994 Raven Software FPS on the FRANK board with HDMI output, SD card WAD loading, and gamepad support.</description>
-  <controls>Gamepad, mouse, keyboard (PS/2 and USB)</controls>
+  <website>https://github.com/rh1tech/frank-heretic</website>
+  <description>Heretic, the dark fantasy FPS released in 1994 by Raven Software, ported to RP2350. Built on a modified DOOM engine licensed from id Software, Heretic replaced demons and shotguns with undead warriors and magical weapons like the Ethereal Crossbow and Phoenix Rod. Set in a medieval fantasy world, you play as Corvus, an elven hero battling the forces of D'Sparil. Features 320x240 HDMI output with full OPL2 music emulation for the atmospheric orchestral soundtrack. Loads WAD files from SD card. Based on Chocolate Heretic.</description>
+  <controls>Keyboard: arrows/Ctrl/Space/Shift/1-7. Mouse: move+buttons. PS/2 and USB supported.</controls>
 </firmware>

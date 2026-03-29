@@ -1,0 +1,8 @@
+<firmware>
+  <title>Duke Nukem 3D</title>
+  <version>1.06</version>
+  <author>Mikhail Matveev</author>
+  <website>https://github.com/rh1tech/frank-duke3d</website>
+  <description>Duke Nukem 3D, the iconic 1996 first-person shooter by 3D Realms, ported to RP2350. Built on Ken Silverman's Build engine, Duke3D pushed boundaries with its interactive environments, humor, and over-the-top action hero protagonist. Fight aliens through LA streets, space stations, and beyond with an arsenal of creative weapons including the Shrink Ray and Devastator. Features HDMI output with I2S audio on 8MB PSRAM. Requires legally obtained DUKE3D.GRP game data on SD card.</description>
+  <controls>PS/2 or USB keyboard: arrows/Ctrl/Space/Shift. Standard Duke3D key bindings.</controls>
+</firmware>

@@ -1,0 +1,8 @@
+<firmware>
+  <title>BK-0010/0011M</title>
+  <version>1.4.4</version>
+  <author>DnCraptor, konst-st, klad-me, y-salnikov</author>
+  <website>https://github.com/DnCraptor/PICO-BK</website>
+  <description>Emulator of the Soviet-era BK home computers for RP2040/RP2350. The BK (Bytovoy Kompyuter), produced by Elektronika in 1985, was one of the most popular Soviet home computers and uniquely used a PDP-11 compatible 16-bit CPU. Emulates BK-0010, BK-0010-01 with FOCAL/BASIC, and the upgraded BK-0011M with 128KB RAM. Features Covox audio, AY-3-8910 TurboSound, floppy controller with SD card disk images, and 8 save state slots. Based on BK8266 by konst-st.</description>
+  <controls>PS/2 or USB keyboard (auto Russian transcoding). NES/Dendy gamepad, Wii controller. Ctrl+F1-F8: save, Alt+F1-F8: load.</controls>
+</firmware>
