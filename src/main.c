@@ -56,7 +56,7 @@
 
 // Layout constants
 #define MARGIN       16
-#define IMG_X        MARGIN
+#define IMG_X        0
 #define IMG_Y        MARGIN
 #define IMG_MAX_W    100
 #define IMG_MAX_H    150
@@ -81,6 +81,13 @@
 #define COL_HINT    5
 #define COL_IMGBG   6
 #define COL_BORDER  7
+#define COL_GREEN   8
+#define COL_TEXTBG  9   // white background for text panel
+#define COL_DARK    10  // dark text on white background
+#define COL_DIMGRAY 11  // dim label on white background
+#define COL_MAGENTA 12  // label keywords on white panel
+#define COL_IMGPAN  13  // image panel background (50% darker than legend)
+#define COL_SHADOW  14  // image shadow
 
 // ============================================================================
 // Globals
@@ -91,6 +98,8 @@ struct semaphore dvi_start_sem;
 static volatile bool core1_stop = false;
 
 static uint8_t framebuffer[SCREEN_W * SCREEN_H];
+static uint8_t *prev_framebuffer;  // for slide transition (allocated from PSRAM)
+static uint8_t *slide_new_fb;     // temp buffer for slide animation (allocated from PSRAM)
 static uint32_t palette_rgb888[256];
 static uint8_t palette_rgb332[256];
 static volatile bool dvi_loading = false;  // When true, Core 1 outputs blank instead of encoding
@@ -207,9 +216,14 @@ static inline void fb_pixel(int x, int y, uint8_t c) {
 }
 
 static void fb_rect(int x, int y, int w, int h, uint8_t c) {
+    // Clamp to screen bounds
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > SCREEN_W) w = SCREEN_W - x;
+    if (y + h > SCREEN_H) h = SCREEN_H - y;
+    if (w <= 0 || h <= 0) return;
     for (int j = y; j < y + h; j++)
-        for (int i = x; i < x + w; i++)
-            fb_pixel(i, j, c);
+        memset(&framebuffer[j * SCREEN_W + x], c, w);
 }
 
 static void fb_char(int x, int y, char ch, uint8_t c) {
@@ -260,6 +274,20 @@ static int fb_text_wrap(int x, int y, const char *s, uint8_t c, int max_w) {
     return lines;
 }
 
+// Draw text with background fill, 1px bold, and custom letter spacing
+static void fb_text_bold_bg(int x, int y, const char *s, uint8_t fg, uint8_t bg) {
+    int adv = FONT_ADV + 2;
+    int len = strlen(s);
+    fb_rect(x - 2, y - 1, len * adv + 3, FONT_H + 2, bg);
+    int cx = x;
+    while (*s) {
+        fb_char(cx, y, *s, fg);
+        fb_char(cx + 1, y, *s, fg);  // bold: 1px offset
+        cx += adv;
+        s++;
+    }
+}
+
 static void fb_text_center(int y, const char *s, uint8_t c) {
     int w = strlen(s) * FONT_ADV;
     fb_text((SCREEN_W - w) / 2, y, s, c);
@@ -293,6 +321,7 @@ static uf2_entry_t *entries = entries_sram;
 static int max_entries = MAX_ENTRIES_SRAM;
 static int entry_count = 0;
 static int selected = 0;
+static char last_flashed[48] = {0};  // filename of currently flashed firmware
 static bool has_psram = false;
 
 // Simple PSRAM bump allocator (entries array sits at PSRAM_BASE, allocs follow)
@@ -514,26 +543,30 @@ static void setup_palette(void) {
     palette_set(COL_HINT,   0x666666);  // dim hint text
     palette_set(COL_IMGBG,  0x0D0D1A);  // image background
     palette_set(COL_BORDER, 0x333355);  // border
+    palette_set(COL_GREEN,  0x44CC44);  // green for "Flashed" indicator
+    palette_set(COL_TEXTBG, 0xF0F0F0); // white background for text panel
+    palette_set(COL_DARK,   0x1A1A2E); // dark text on white panel
+    palette_set(COL_DIMGRAY,0x666666); // dim labels on white panel
+    palette_set(COL_MAGENTA,0xCC44CC); // magenta for label keywords
+    palette_set(COL_IMGPAN, 0x1A1A2B); // image panel bg (50% darker than #333355)
+    palette_set(COL_SHADOW, 0x0D0D15); // image shadow
     // Indices 16-255 reserved for BMP palette (set when BMP is loaded)
 }
 
-static void draw_label(int x, int y, const char *label, const char *value) {
-    fb_text(x, y, label, COL_GRAY);
-    fb_text(x + strlen(label) * FONT_ADV, y, value, COL_VALUE);
+static void draw_label(int x, int y, const char *label, const char *value, uint8_t label_col, uint8_t value_col) {
+    fb_text(x, y, label, label_col);
+    fb_text(x + strlen(label) * FONT_ADV, y, value, value_col);
 }
 
-static void render_entry(int idx) {
-    // Clear framebuffer in small chunks to avoid bus starvation of Core 1 DVI
-    for (int y = 0; y < SCREEN_H; y++)
-        memset(&framebuffer[y * SCREEN_W], COL_BG, SCREEN_W);
+#define IMG_PANEL_W (TEXT_X - 8)
 
-    if (entry_count == 0) {
-        fb_text_center(SCREEN_H / 2 - 4, "No UF2 files found", COL_WHITE);
-        fb_text_center(SCREEN_H / 2 + 10, "Place .uf2 files in /kickstart", COL_GRAY);
-        return;
-    }
-
+// Draw image panel (left side): cover art + flashed indicator
+static void render_image_panel(int idx) {
     uf2_entry_t *e = &entries[idx];
+
+    // Fill image panel with dark background
+    for (int y = 0; y < SCREEN_H; y++)
+        memset(&framebuffer[y * SCREEN_W], COL_IMGPAN, IMG_PANEL_W);
 
     // Reload BMP palette into screen palette for this entry
     if (e->has_bmp) {
@@ -541,10 +574,13 @@ static void render_entry(int idx) {
             palette_set(16 + i, e->bmp_rgb888[i]);
     }
 
-    // Draw image
+    // Draw image with 2px shadow
     if (e->has_bmp && e->bmp_pixels) {
         int ox = IMG_X;
         int oy = IMG_Y;
+        // Shadow (2px offset down-right)
+        fb_rect(ox + 2, oy + 2, e->bmp_w, e->bmp_h, COL_SHADOW);
+        // Image
         for (int y = 0; y < e->bmp_h; y++) {
             for (int x = 0; x < e->bmp_w; x++) {
                 uint8_t pi = e->bmp_pixels[y * e->bmp_w + x];
@@ -553,45 +589,201 @@ static void render_entry(int idx) {
         }
     }
 
+}
+
+// Draw text panel (right side): title, metadata, hints
+static void render_text_panel(int idx) {
+    uf2_entry_t *e = &entries[idx];
+
+    // White background for text panel below gradient
+    int grad_h = TEXT_Y + LINE_H + 3;  // top through end of title + 3px
+    int bot_grad = 5;  // bottom gradient height
+    int white_bot = HINT_Y - 7;
+    fb_rect(TEXT_X - 8, grad_h, SCREEN_W - TEXT_X + 8, white_bot - grad_h - bot_grad, COL_TEXTBG);
+
+    // Dithered gradient from black to white: top of panel down to title
+    {
+        static const int bayer2[2][2] = {{0, 2}, {3, 1}};  // thresholds 0-3
+        int gx = TEXT_X - 8;
+        int gw = SCREEN_W - TEXT_X + 8;
+        for (int row = 0; row < grad_h; row++) {
+            int brightness = (row * 4) / grad_h;  // 0..3
+            for (int x = gx; x < gx + gw; x++) {
+                uint8_t c = (brightness > bayer2[row & 1][x & 1]) ? COL_TEXTBG : COL_BG;
+                framebuffer[row * SCREEN_W + x] = c;
+            }
+        }
+    }
+
+    // Dithered gradient from white to legend color at bottom of white area
+    {
+        static const int bayer2[2][2] = {{0, 2}, {3, 1}};
+        int gx = TEXT_X - 8;
+        int gw = SCREEN_W - TEXT_X + 8;
+        int gy = white_bot - bot_grad;
+        for (int row = 0; row < bot_grad; row++) {
+            int darkness = (row * 4) / bot_grad;  // 0..3 (white→dark)
+            for (int x = gx; x < gx + gw; x++) {
+                uint8_t c = (darkness > bayer2[(gy + row) & 1][x & 1]) ? COL_BORDER : COL_TEXTBG;
+                framebuffer[(gy + row) * SCREEN_W + x] = c;
+            }
+        }
+    }
+
     // Title + metadata to the right of image
     int ty = TEXT_Y;
-    fb_text(TEXT_X, ty, e->title, COL_TITLE);
+    {
+        char upper_title[64];
+        int i;
+        for (i = 0; i < (int)sizeof(upper_title) - 1 && e->title[i]; i++)
+            upper_title[i] = toupper((unsigned char)e->title[i]);
+        upper_title[i] = 0;
+        // Bold title with white outline over gradient
+        int adv = FONT_ADV + 2;
+        // Outline pass (white, 1px in all directions)
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                if (dx == 0 && dy == 0) continue;
+                int cx = TEXT_X + dx;
+                const char *p = upper_title;
+                while (*p) {
+                    fb_char(cx, ty + dy, *p, COL_WHITE);
+                    fb_char(cx + 1, ty + dy, *p, COL_WHITE);
+                    cx += adv;
+                    p++;
+                }
+            }
+        }
+        // Foreground pass (dark)
+        {
+            int cx = TEXT_X;
+            const char *p = upper_title;
+            while (*p) {
+                fb_char(cx, ty, *p, COL_DARK);
+                fb_char(cx + 1, ty, *p, COL_DARK);
+                cx += adv;
+                p++;
+            }
+        }
+    }
     ty += LINE_H + 4;
 
-    if (e->version[0]) { draw_label(TEXT_X, ty, "Version: ", e->version); ty += LINE_H; }
-    if (e->author[0])  { draw_label(TEXT_X, ty, "Author: ", e->author); ty += LINE_H; }
+    if (e->version[0]) { draw_label(TEXT_X, ty, "Version: ", e->version, COL_MAGENTA, COL_DARK); ty += LINE_H; }
+    if (e->author[0])  { draw_label(TEXT_X, ty, "Author: ", e->author, COL_MAGENTA, COL_DARK); ty += LINE_H; }
     if (e->website[0]) {
-        fb_text(TEXT_X, ty, "Web:", COL_GRAY);
+        fb_text(TEXT_X, ty, "Web:", COL_MAGENTA);
         ty += LINE_H;
-        int lines = fb_text_wrap(TEXT_X, ty, e->website, COL_VALUE, TEXT_W);
+        int lines = fb_text_wrap(TEXT_X, ty, e->website, COL_DARK, TEXT_W);
         ty += lines * LINE_H;
     }
 
     // Description below metadata (still to the right of image)
     if (e->description[0]) {
         ty += 4;
-        int lines = fb_text_wrap(TEXT_X, ty, e->description, COL_VALUE, TEXT_W);
+        int lines = fb_text_wrap(TEXT_X, ty, e->description, COL_DARK, TEXT_W);
         ty += lines * LINE_H;
     }
 
     // Controls below description (with wrapping)
     if (e->controls[0]) {
         ty += 4;
-        fb_text(TEXT_X, ty, "Controls:", COL_GRAY);
+        fb_text(TEXT_X, ty, "Controls:", COL_MAGENTA);
         ty += LINE_H;
-        int lines = fb_text_wrap(TEXT_X, ty, e->controls, COL_VALUE, TEXT_W);
+        int lines = fb_text_wrap(TEXT_X, ty, e->controls, COL_DARK, TEXT_W);
         ty += lines * LINE_H;
     }
 
     // Filename below controls
     ty += 4;
-    fb_text(TEXT_X, ty, e->filename, COL_GRAY);
+    fb_text(TEXT_X, ty, e->filename, COL_DIMGRAY);
 
-    // Bottom hint bar
+    // Bottom hint bar — dark grey background aligned with white text panel
+    fb_rect(TEXT_X - 8, HINT_Y - 7, SCREEN_W - TEXT_X + 8, SCREEN_H - HINT_Y + 7, COL_BORDER);
     char hint[64];
     snprintf(hint, sizeof(hint), "< LEFT   %d / %d   RIGHT >", selected + 1, entry_count);
-    fb_text_center(HINT_Y, hint, COL_HINT);
-    fb_text_center(HINT_Y + LINE_H, "Enter / Start to flash", COL_HINT);
+    fb_text(TEXT_X, HINT_Y + 2, hint, COL_VALUE);
+    bool is_flashed = last_flashed[0] && strcmp(e->filename, last_flashed) == 0;
+    fb_text(TEXT_X, HINT_Y + 2 + LINE_H, is_flashed ? "Enter / Start to launch" : "Enter / Start to flash", COL_VALUE);
+
+    // "Flashed" indicator — right side of legend, vertically centered
+    if (is_flashed) {
+        int legend_top = HINT_Y - 7;
+        int legend_h = SCREEN_H - legend_top;
+        int fy = legend_top + legend_h / 2 - FONT_H / 2;
+        int text_w = 7 * FONT_ADV;  // "Flashed" = 7 chars
+        int r = 6;
+        int total_w = 2 * r + 4 + text_w;
+        int fx = SCREEN_W - MARGIN - total_w;
+        int cx = fx + r;
+        int cy_c = fy + FONT_H / 2;
+        // Green circle
+        for (int dy = -r; dy <= r; dy++)
+            for (int dx = -r; dx <= r; dx++)
+                if (dx * dx + dy * dy <= r * r)
+                    fb_pixel(cx + dx, cy_c + dy, COL_GREEN);
+        // Checkmark
+        fb_pixel(cx - 2, cy_c,     COL_BORDER);
+        fb_pixel(cx - 1, cy_c + 1, COL_BORDER);
+        fb_pixel(cx,     cy_c + 2, COL_BORDER);
+        fb_pixel(cx + 1, cy_c + 1, COL_BORDER);
+        fb_pixel(cx + 2, cy_c,     COL_BORDER);
+        fb_pixel(cx + 3, cy_c - 1, COL_BORDER);
+        fb_pixel(cx + 4, cy_c - 2, COL_BORDER);
+        // Text
+        fb_text(cx + r + 4, fy, "Flashed", COL_GREEN);
+    }
+}
+
+static void render_entry(int idx) {
+    if (entry_count == 0) {
+        for (int y = 0; y < SCREEN_H; y++)
+            memset(&framebuffer[y * SCREEN_W], COL_BG, SCREEN_W);
+        fb_text_center(SCREEN_H / 2 - 4, "No UF2 files found", COL_WHITE);
+        fb_text_center(SCREEN_H / 2 + 10, "Place .uf2 files in /kickstart", COL_GRAY);
+        return;
+    }
+    render_image_panel(idx);
+    render_text_panel(idx);
+}
+
+// Horizontal slide transition: dir = +1 (navigated right), -1 (navigated left)
+// prev_framebuffer = old screen, framebuffer = new screen (from render_entry).
+// Both buffers are read-only during animation; composites row-by-row into framebuffer.
+// After animation, framebuffer holds the new content.
+static void slide_transition(int dir) {
+    if (!slide_new_fb) return;  // no PSRAM — skip animation
+    // Only scroll the left image panel (0 to IMG_PANEL_W).
+    // Text panel was already updated by render_text_panel before this call.
+    // Save new frame's image panel to PSRAM
+    for (int y = 0; y < SCREEN_H; y++)
+        memcpy(&slide_new_fb[y * IMG_PANEL_W], &framebuffer[y * SCREEN_W], IMG_PANEL_W);
+    // Restore old image panel from prev_framebuffer (stored with IMG_PANEL_W stride)
+    for (int y = 0; y < SCREEN_H; y++)
+        memcpy(&framebuffer[y * SCREEN_W], &prev_framebuffer[y * IMG_PANEL_W], IMG_PANEL_W);
+
+    #define SLIDE_STEPS 8
+    // Steps sum to IMG_PANEL_W (108 pixels): 14+14+14+16+14+14+12+10 = 108
+    static const int steps[SLIDE_STEPS] = {14, 14, 14, 16, 14, 14, 12, 10};
+    int revealed = 0;
+    for (int step = 0; step < SLIDE_STEPS; step++) {
+        int px = steps[step];
+        revealed += px;
+        for (int y = 0; y < SCREEN_H; y++) {
+            uint8_t *row = &framebuffer[y * SCREEN_W];
+            uint8_t *src = &slide_new_fb[y * IMG_PANEL_W];
+            if (dir > 0) {
+                memmove(row, row + px, IMG_PANEL_W - px);
+                memcpy(row + IMG_PANEL_W - px, src + IMG_PANEL_W - revealed, px);
+            } else {
+                memmove(row + px, row, IMG_PANEL_W - px);
+                memcpy(row, src + revealed - px, px);
+            }
+        }
+        sleep_ms(25);
+    }
+    // Final: copy full new frame
+    for (int y = 0; y < SCREEN_H; y++)
+        memcpy(&framebuffer[y * SCREEN_W], &slide_new_fb[y * IMG_PANEL_W], IMG_PANEL_W);
 }
 
 // ============================================================================
@@ -1049,6 +1241,9 @@ int main(void) {
         // Reserve space for entries array, bump allocator starts after
         psram_alloc_offset = sizeof(uf2_entry_t) * MAX_ENTRIES_PSRAM;
         psram_alloc_offset = (psram_alloc_offset + 3) & ~3;
+        // Allocate slide transition buffers from PSRAM
+        prev_framebuffer = (uint8_t *)psram_malloc(SCREEN_W * SCREEN_H);
+        slide_new_fb = (uint8_t *)psram_malloc(SCREEN_W * SCREEN_H);
         printf("PSRAM detected - %d entry slots available\n", max_entries);
     } else {
         printf("No PSRAM - using SRAM (%d entry slots)\n", max_entries);
@@ -1107,6 +1302,7 @@ int main(void) {
             for (int i = 0; i < entry_count; i++) {
                 if (strcmp(entries[i].filename, last_name) == 0) {
                     selected = i;
+                    strncpy(last_flashed, last_name, sizeof(last_flashed) - 1);
                     break;
                 }
             }
@@ -1236,24 +1432,42 @@ start_dvi:
         prev_input = input;
 
         // Handle navigation
-        bool changed = false;
+        int nav_dir = 0;
         if ((pressed & 1) && entry_count > 0) {
             selected = (selected - 1 + entry_count) % entry_count;
-            changed = true;
+            nav_dir = -1;  // navigated left
         }
         if ((pressed & 2) && entry_count > 0) {
             selected = (selected + 1) % entry_count;
-            changed = true;
+            nav_dir = 1;   // navigated right
         }
 
-        if (changed) {
-            render_entry(selected);
+        if (nav_dir) {
+            // Save old image panel, update text instantly, animate image
+            if (prev_framebuffer)
+                for (int y = 0; y < SCREEN_H; y++)
+                    memcpy(&prev_framebuffer[y * IMG_PANEL_W], &framebuffer[y * SCREEN_W], IMG_PANEL_W);
+            render_text_panel(selected);
+            render_image_panel(selected);
+            slide_transition(nav_dir);
             printf("Selected: %s (%d/%d)\n", entries[selected].filename, selected + 1, entry_count);
         }
 
         // Launch selected firmware (A or Start button)
         if ((pressed & 4) && entry_count > 0) {
             printf("Launching: %s\n", entries[selected].filename);
+
+            // Already flashed — just reboot into it
+            if (last_flashed[0] && strcmp(entries[selected].filename, last_flashed) == 0) {
+                printf("Already flashed, rebooting...\n");
+                memset(framebuffer, COL_BG, sizeof(framebuffer));
+                fb_text_center(SCREEN_H / 2 - LINE_H, "Loading:", COL_WHITE);
+                fb_text_center(SCREEN_H / 2 + LINE_H, entries[selected].title, COL_TITLE);
+                sleep_ms(500);
+                watchdog_hw->scratch[0] = SCRATCH_MAGIC_BOOT;
+                watchdog_enable(100, true);
+                while (true) tight_loop_contents();
+            }
 
             // Build full path
             char path[MAX_PATH];
