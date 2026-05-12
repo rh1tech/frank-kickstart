@@ -1,5 +1,7 @@
 # FRANK Kickstart
 
+Official page: **[frank.rh1.tech](https://frank.rh1.tech/)** — hub for all FRANK boards and firmware.
+
 UF2 firmware launcher for Raspberry Pi Pico 2 (RP2350) with HDMI output, SD card browser, NES/SNES gamepad, USB gamepad, PS/2 keyboard, and USB keyboard support.
 
 Scans the `kickstart` directory on an SD card for `.uf2` firmware files, displays cover art and metadata on an 800x600 HDMI screen, and flashes the selected firmware directly from the launcher. Based on the boot redirect mechanism from [pico-launcher](https://github.com/DnCraptor/pico-launcher) by [xrip](https://github.com/xrip) and [DnCraptor](https://github.com/DnCraptor).
