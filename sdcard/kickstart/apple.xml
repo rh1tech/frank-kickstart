@@ -3,6 +3,7 @@
   <version>1.04</version>
   <author>Mikhail Matveev, DnCraptor</author>
   <website>https://github.com/rh1tech/frank-apple</website>
-  <description>Apple IIe emulator with full 65C02 CPU running on RP2350. The Apple II, introduced in 1977 by Steve Wozniak, was one of the first mass-produced personal computers and a cornerstone of the home computing revolution. Supports all video modes including Text, Lo-Res, Hi-Res, and Double Hi-Res. Loads DSK, NIB, WOZ, and BDSK disk images from SD card with write-back support. Based on the MII emulator by Michel Pollet.</description>
-  <controls>PS/2 or USB keyboard. NES/USB gamepad. F11: disk UI. Open/Closed Apple via Alt/Win keys. Joystick via numpad.</controls>
+  <description>An Apple //e on MII: 65C02 and every video mode up to Double Hi-Res. Loads DSK, NIB and WOZ disks from the SD card.</description>
+  <controls>Keyboard, NES/USB pad. F11: disks, Alt/Win: Open/Closed Apple, Ctrl+Alt+Del: reset.</controls>
+  <boards>m1 m2</boards>
 </firmware>

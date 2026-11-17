@@ -1,0 +1,9 @@
+<firmware>
+  <title>Blood</title>
+  <version>1.01</version>
+  <author>Mikhail Matveev; NBlood</author>
+  <website>https://github.com/rh1tech/frank-blood</website>
+  <description>Blood, Monolith's 1997 Build-engine shooter, on NBlood with OPL2 FM music. Single player; needs your own Blood 1.21 data in /blood.</description>
+  <controls>USB keyboard, mouse or gamepad. Standard Blood keys.</controls>
+  <boards>m2</boards>
+</firmware>

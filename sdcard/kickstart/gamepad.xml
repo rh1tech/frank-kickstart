@@ -1,0 +1,9 @@
+<firmware>
+  <title>Gamepad Tester</title>
+  <version>1.02</version>
+  <author>Mikhail Matveev</author>
+  <website>https://github.com/rh1tech/frank-gamepad</website>
+  <description>A USB gamepad mapping tool for HID and XInput pads: press each button as asked and it writes gamepad_VID_PID.txt to the SD card.</description>
+  <controls>USB HID or XInput gamepad on the USB port; follow the on-screen prompts.</controls>
+  <boards>m2</boards>
+</firmware>

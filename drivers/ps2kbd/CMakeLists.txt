@@ -9,12 +9,10 @@ ${CMAKE_CURRENT_LIST_DIR}/ps2kbd_mrmltr.h
 
 target_link_libraries(ps2kbd PRIVATE hardware_pio hardware_clocks)
 
-# Add board variant define and KBD_CLOCK_PIN for PIO program selection
-if(BOARD_VARIANT STREQUAL "M2")
-    target_compile_definitions(ps2kbd PRIVATE BOARD_M2 KBD_CLOCK_PIN=2)
-else()
-    target_compile_definitions(ps2kbd PRIVATE BOARD_M1 KBD_CLOCK_PIN=0)
-endif()
+# Board define and the clock pin, which picks the PIO program (data on the
+# next pin): M1 clock 0, M2 and Z0 clock 2
+target_compile_definitions(ps2kbd PRIVATE BOARD_${BOARD_VARIANT}
+    KBD_CLOCK_PIN=${PS2_PIN_CLK} PS2_PIN_CLK=${PS2_PIN_CLK} PS2_PIN_DATA=${PS2_PIN_CLK}+1)
 
 target_include_directories(ps2kbd PUBLIC
   ${CMAKE_CURRENT_LIST_DIR}

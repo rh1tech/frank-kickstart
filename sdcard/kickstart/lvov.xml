@@ -1,0 +1,9 @@
+<firmware>
+  <title>PK-01 Lvov</title>
+  <version>0.5.4</version>
+  <author>DnCraptor; Emu80 by V. Pykhonin</author>
+  <website>https://github.com/DnCraptor/emu80v4</website>
+  <description>The Soviet PK-01 Lvov, an 8080 home computer with colour graphics, on Emu80. Loads tape images from the SD card.</description>
+  <controls>PS/2 or USB keyboard. Alt: menu, Enter: select, Esc: back, Ctrl+Alt+Del: reset.</controls>
+  <boards>m1 m2</boards>
+</firmware>

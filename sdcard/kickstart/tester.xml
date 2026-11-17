@@ -1,0 +1,9 @@
+<firmware>
+  <title>Murmulator Tester</title>
+  <version>1.2.2</version>
+  <author>DnCraptor</author>
+  <website>https://github.com/DnCraptor/murmulator-tester</website>
+  <description>A hardware test for Murmulator boards: video, PS/2 scan codes, NES pad, SD card, PSRAM, flash and sound channels.</description>
+  <controls>PS/2 keyboard and NES pad. Ctrl+Alt+Del: reboot.</controls>
+  <boards>m1 m2</boards>
+</firmware>

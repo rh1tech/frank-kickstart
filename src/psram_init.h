@@ -4,5 +4,6 @@
 #include "pico/stdlib.h"
 
 void psram_init(uint cs_pin);
+void psram_reset_to_spi(void);
 
 #endif

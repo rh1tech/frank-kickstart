@@ -3,14 +3,14 @@
 #
 # release.sh - Build all release variants of frank-kickstart
 #
-# Creates firmware files for each board variant (M1, M2):
+# Creates firmware files for each board variant (M1, M2, Z0):
 #   - UF2 format for direct flashing
 #
 # Output format: frank-kickstart_<board>_<version>.uf2
 #
 # Release configuration:
-#   - CPU: 400 MHz (DVI bit clock)
-#   - PSRAM: 133 MHz
+#   - CPU: 252 MHz (640x480 HDMI, 25.2 MHz pixel clock)
+#   - PSRAM: 133 MHz (required)
 
 set -e
 
@@ -95,7 +95,7 @@ RELEASE_DIR="$SCRIPT_DIR/release"
 mkdir -p "$RELEASE_DIR"
 
 # Configuration
-BOARDS=("M1" "M2")
+BOARDS=("M1" "M2" "Z0")
 TOTAL_BUILDS=${#BOARDS[@]}
 BUILD_COUNT=0
 
@@ -122,15 +122,13 @@ build_variant() {
     cd build
 
     # Build cmake arguments
-    local CMAKE_ARGS="-DPICO_BOARD=pico2"
-    CMAKE_ARGS="$CMAKE_ARGS -DBOARD_VARIANT=$BOARD"
+    local CMAKE_ARGS="-DBOARD_VARIANT=$BOARD"
 
     # Configure with CMake
     if cmake $CMAKE_ARGS .. > /dev/null 2>&1; then
         # Build
-        if make -j8 > /dev/null 2>&1; then
-            # Find and copy output file
-            local SRC_FILE=$(find "$SCRIPT_DIR" -name "*.uf2" -newer "$SCRIPT_DIR/build/CMakeCache.txt" 2>/dev/null | head -1)
+        if make -j8 frank-kickstart > /dev/null 2>&1; then
+            local SRC_FILE="$SCRIPT_DIR/build/frank-kickstart.uf2"
 
             if [[ -f "$SRC_FILE" ]]; then
                 cp "$SRC_FILE" "$RELEASE_DIR/$OUTPUT_NAME"
@@ -140,7 +138,7 @@ build_variant() {
             fi
         else
             echo -e "  ${RED}✗ Build failed${NC}"
-            make -j8 2>&1 | tail -20
+            make -j8 frank-kickstart 2>&1 | tail -20
         fi
     else
         echo -e "  ${RED}✗ CMake failed${NC}"

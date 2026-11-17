@@ -1,0 +1,9 @@
+<firmware>
+  <title>Amiga</title>
+  <version>0.1.0</version>
+  <author>drewpo28; Musashi 68k core</author>
+  <website>https://github.com/drewpo28/pico-amiga</website>
+  <description>An Amiga 500, 600, 1200 and CD32: OCS, ECS, AGA and Paula sound. Runs ADF, DMS, HDF and CD32 images. Needs 8 MB PSRAM.</description>
+  <controls>Keyboard, mouse, gamepads. F12: menu, Ctrl+F12: DF0 disk, F11: reset, Win+F11: reboot.</controls>
+  <boards>m1 m2 z0</boards>
+</firmware>

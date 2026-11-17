@@ -1,8 +1,9 @@
 <firmware>
   <title>SpeccyP</title>
-  <version>1.5.7</version>
-  <author>billgilbert7000</author>
+  <version>1.8.0</version>
+  <author>billgilbert7000, AlexEkb</author>
   <website>https://github.com/billgilbert7000/SpeccyP</website>
-  <description>ZX Spectrum emulator running on RP2350. Designed by Sir Clive Sinclair and released in 1982, the Spectrum was the most popular home computer in the UK and a birthplace of the European gaming industry. Its affordable price spawned a generation of bedroom coders and thousands of games from Manic Miner to Elite. Emulates 48K, 128K, and Pentagon models with AY-3-8910 sound. Supports TAP, TZX, SNA, Z80 snapshots and Betadisk interface. </description>
-  <controls>PS/2 or USB keyboard. NES/Xbox gamepad (Kempston). F1: help, F2: save, F11: file browser, F12: settings.</controls>
+  <description>A ZX Spectrum 48K, Pentagon 128/512/1024, Scorpion and Navigator with AY, TurboSound and Betadisk. Loads TAP, TZX, TRD.</description>
+  <controls>PS/2 or USB keyboard, gamepad as Kempston. F11: files, F12: settings, F1: help.</controls>
+  <boards>m1 m2 z0</boards>
 </firmware>

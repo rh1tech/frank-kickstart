@@ -1,0 +1,9 @@
+<firmware>
+  <title>FRANK Quest</title>
+  <version>1.00</version>
+  <author>Mikhail Matveev; ScummVM team</author>
+  <website>https://github.com/rh1tech/frank-quest</website>
+  <description>Adventure games on Cabal, a ScummVM fork: SCUMM, Sierra AGI and SCI, Gobliiins and Kyrandia. Bring your own game files.</description>
+  <controls>PS/2 or USB keyboard and mouse. Esc: skip a scene, Space: pause, Ctrl+Alt+Del: game list.</controls>
+  <boards>m1 m2</boards>
+</firmware>

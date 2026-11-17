@@ -1,0 +1,9 @@
+<firmware>
+  <title>MPEG Video Player</title>
+  <version>1.00</version>
+  <author>Mikhail Matveev; pl_mpeg</author>
+  <website>https://github.com/rh1tech/frank-video</website>
+  <description>An MPEG-1 video player on pl_mpeg: 320x240 video with stereo sound, streamed from the SD card.</description>
+  <controls>PS/2 or USB keyboard. Arrows: choose, Enter: play, Space: pause, Esc: back to the list.</controls>
+  <boards>m1 m2</boards>
+</firmware>

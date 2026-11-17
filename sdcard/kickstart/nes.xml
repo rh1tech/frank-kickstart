@@ -1,8 +1,9 @@
 <firmware>
   <title>NES</title>
-  <version>1.01</version>
-  <author>Mikhail Matveev</author>
+  <version>1.12</version>
+  <author>Mikhail Matveev; QuickNES</author>
   <website>https://github.com/rh1tech/frank-nes</website>
-  <description>Nintendo Entertainment System emulator running on RP2350. The NES, released in 1983 in Japan and 1985 worldwide, single-handedly revived the video game industry after the 1983 crash. Home to legendary franchises like Super Mario Bros., The Legend of Zelda, Metroid, and Mega Man. Features 640x480 HDMI output with full APU sound including VRC6, VRC7, and FME-7 expansion audio chips. Includes an SD card ROM browser with cover art and game info. Based on QuickNES by Shay Green (blargg).</description>
-  <controls>NES/SNES/USB gamepad or keyboard (Z/X/Enter/Space/arrows). Select+Start: settings menu.</controls>
+  <description>A NES / Famicom / Dendy on QuickNES, with expansion audio and save states. A ROM browser with cover art on the SD card.</description>
+  <controls>NES/SNES/USB pad or keyboard (arrows, Z, X, Enter, Space). Select+Start or F12: settings.</controls>
+  <boards>m1 m2 z0</boards>
 </firmware>

@@ -17,3 +17,5 @@ third_party/
 # Firmware
 
 sdcard/kickstart/*.uf2
+# Host renders (tools/host_render.sh)
+build-host/

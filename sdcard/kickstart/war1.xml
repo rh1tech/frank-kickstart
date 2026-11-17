@@ -1,0 +1,9 @@
+<firmware>
+  <title>Warcraft</title>
+  <version>1.02</version>
+  <author>Mikhail Matveev; Alejandro Coto</author>
+  <website>https://github.com/rh1tech/frank-war1</website>
+  <description>Warcraft: Orcs and Humans on war1, with the original game's computer player. Needs your own DATA.WAR in /war1.</description>
+  <controls>USB keyboard and mouse, USB gamepad. F12: settings.</controls>
+  <boards>m2</boards>
+</firmware>

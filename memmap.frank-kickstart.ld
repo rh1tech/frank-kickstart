@@ -6,6 +6,8 @@
  *   (gap)  0x10001000             ~15.7MB — user firmware area
  *   ERASE  0x10000000+16M-260k   4KB   — ZERO_BLOCK
  *   FLASH  0x10000000+16M-256k   256KB — Frank-Kickstart code
+ *
+ * RAM: 504 KB, then core 0's 8 KB stack; core 1's stack in SCRATCH_X.
  */
 
 MEMORY
@@ -13,7 +15,8 @@ MEMORY
     BOOT2(rx) : ORIGIN = 0x10000000, LENGTH = 4k
     ERASE(rx) : ORIGIN = 0x10000000 + 16M - 260k, LENGTH = 4k
     FLASH(rx) : ORIGIN = 0x10000000 + 16M - 256k, LENGTH = 256k
-    RAM(rwx) : ORIGIN =  0x20000000, LENGTH = 512k
+    RAM(rwx) : ORIGIN =  0x20000000, LENGTH = 504k
+    STACK_RAM(rwx) : ORIGIN = 0x2007E000, LENGTH = 8k
     SCRATCH_X(rwx) : ORIGIN = 0x20080000, LENGTH = 4k
     SCRATCH_Y(rwx) : ORIGIN = 0x20081000, LENGTH = 4k
 }
@@ -203,21 +206,23 @@ SECTIONS
     {
         *(.stack1*)
     } > SCRATCH_X
+    /* core 0's stack has its own 8 KB (font rendering, FatFs LFN); SCRATCH_Y
+     * is left to the video driver */
     .stack_dummy (NOLOAD):
     {
         KEEP(*(.stack*))
-    } > SCRATCH_Y
+    } > STACK_RAM
 
     .flash_end : {
         KEEP(*(.embedded_end_block*))
         PROVIDE(__flash_binary_end = .);
     } > FLASH =0xaa
 
-    __StackLimit = ORIGIN(RAM) + LENGTH(RAM);
+    __StackLimit = ORIGIN(STACK_RAM);
     __StackOneTop = ORIGIN(SCRATCH_X) + LENGTH(SCRATCH_X);
-    __StackTop = ORIGIN(SCRATCH_Y) + LENGTH(SCRATCH_Y);
+    __StackTop = ORIGIN(STACK_RAM) + LENGTH(STACK_RAM);
     __StackOneBottom = __StackOneTop - SIZEOF(.stack1_dummy);
-    __StackBottom = __StackTop - SIZEOF(.stack_dummy);
+    __StackBottom = ORIGIN(STACK_RAM);
     PROVIDE(__stack = __StackTop);
 
     PROVIDE (__heap_start = __end__);

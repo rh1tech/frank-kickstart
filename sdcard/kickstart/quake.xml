@@ -3,6 +3,7 @@
   <version>RC2</version>
   <author>DnCraptor, wbcbz7</author>
   <website>https://github.com/DnCraptor/quakegeneric</website>
-  <description>Quake, the revolutionary 1996 FPS by id Software, ported to RP2350. Designed by John Carmack, Quake was the first true-3D FPS with fully polygonal environments and enemies. Its dark gothic atmosphere, NIN soundtrack by Trent Reznor, and lightning-fast gameplay. Features 320x240 HDMI/VGA output with I2S or PWM audio. Supports shareware and registered .pak files plus official mission packs. Based on quakegeneric.</description>
-  <controls>PS/2 or USB keyboard+mouse. NES gamepad. Standard Quake bindings: WASD/arrows, mouse look, Ctrl: fire.</controls>
+  <description>Quake, id Software's 1996 shooter, on quakegeneric. Plays the shareware or registered PAK files from the SD card.</description>
+  <controls>PS/2 or USB keyboard and mouse: WASD/arrows, mouse look, Ctrl: fire.</controls>
+  <boards>m1 m2 z0</boards>
 </firmware>

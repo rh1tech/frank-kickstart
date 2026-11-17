@@ -1,0 +1,9 @@
+<firmware>
+  <title>Diablo</title>
+  <version>0.01</version>
+  <author>Mikhail Matveev; DevilutionX</author>
+  <website>https://github.com/rh1tech/frank-diablo</website>
+  <description>Blizzard's 1996 action RPG on DevilutionX 1.5.5 at 640x480, HDMI sound, 504 MHz. Needs DIABDAT.MPQ or spawn.mpq in /diablo.</description>
+  <controls>USB mouse and keyboard as on the PC: click to walk and attack, Esc: menu.</controls>
+  <boards>m2</boards>
+</firmware>

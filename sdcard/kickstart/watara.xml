@@ -1,0 +1,9 @@
+<firmware>
+  <title>Watara Supervision</title>
+  <version>2.2.1</version>
+  <author>DnCraptor, xrip; Potator core</author>
+  <website>https://github.com/DnCraptor/pico-watara</website>
+  <description>The Watara Supervision handheld on Potator. Loads SV cartridges from the SD card, with save states and input recording.</description>
+  <controls>Keyboard or NES/USB pad. Enter: Start, F10: file browser.</controls>
+  <boards>m1 m2 z0</boards>
+</firmware>

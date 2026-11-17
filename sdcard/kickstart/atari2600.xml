@@ -1,0 +1,9 @@
+<firmware>
+  <title>Atari 2600</title>
+  <version>4.0.7</version>
+  <author>DnCraptor; z26 by John Saeger</author>
+  <website>https://github.com/DnCraptor/pico-z26</website>
+  <description>The Atari 2600 VCS on z26. Pick ROMs in the file browser; the last game is kept in flash and starts at power-on.</description>
+  <controls>PS/2 or USB keyboard, NES gamepad. On-screen menu for settings and files.</controls>
+  <boards>m1 m2 z0</boards>
+</firmware>

@@ -1,0 +1,9 @@
+<firmware>
+  <title>Atari Lynx</title>
+  <version>2.1.3</version>
+  <author>xrip, DnCraptor; Handy core</author>
+  <website>https://github.com/DnCraptor/pico-lynx</website>
+  <description>The Atari Lynx handheld on the Handy core. Loads LNX cartridges from the SD card.</description>
+  <controls>PS/2 keyboard or NES pad. Start+Select: menu.</controls>
+  <boards>m1 m2</boards>
+</firmware>

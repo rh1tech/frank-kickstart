@@ -1,0 +1,9 @@
+<firmware>
+  <title>ALF TV Game</title>
+  <version>1.2.B</version>
+  <author>DnCraptor</author>
+  <website>https://github.com/DnCraptor/pico-alf</website>
+  <description>The Soviet ALF TV Game, a Spectrum-based cartridge console, cut out of pico-spec. Loads cartridge ROMs from the SD card.</description>
+  <controls>PS/2 or USB keyboard, NES pad. F1 or Start+Select: menu and cartridges.</controls>
+  <boards>m1 m2</boards>
+</firmware>

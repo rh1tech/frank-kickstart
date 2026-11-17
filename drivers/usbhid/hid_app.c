@@ -448,6 +448,9 @@ static uint16_t hid_to_kbd_state_bit(uint8_t keycode) {
         // F12 -> Settings menu (alternative)
         case 0x45: return (1 << 13); // F12 -> KBD_STATE_F12
 
+        // M -> music on/off (frank-kickstart)
+        case 0x10: return (1 << 14); // M -> KBD_STATE_M
+
         default: return 0;
     }
 }

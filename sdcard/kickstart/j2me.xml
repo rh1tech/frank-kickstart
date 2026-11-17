@@ -1,0 +1,9 @@
+<firmware>
+  <title>J2ME</title>
+  <version>0.1.1</version>
+  <author>DnCraptor; Nano Java</author>
+  <website>https://github.com/DnCraptor/pico-j2me</website>
+  <description>Java ME phone games and apps (MIDP 2.0, Nokia UI) on a Java VM in C. Runs JAR files from /j2me. Needs PSRAM for most games.</description>
+  <controls>PS/2 or USB keyboard, NES/SNES pad. In the list, Left/Right: phone screen size.</controls>
+  <boards>m1 m2 z0</boards>
+</firmware>

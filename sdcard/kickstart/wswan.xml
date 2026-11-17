@@ -1,0 +1,9 @@
+<firmware>
+  <title>WonderSwan Color</title>
+  <version>1.0.6</version>
+  <author>DnCraptor, xrip; Oswan core</author>
+  <website>https://github.com/DnCraptor/pico-wonderswan</website>
+  <description>The Bandai WonderSwan and WonderSwan Color on Oswan. Loads WS and WSC cartridges from the SD card.</description>
+  <controls>Arrows, Z/X: B/A, Enter: Start, Esc: Select/menu, F10: files. NES/USB pad.</controls>
+  <boards>m1 m2 z0</boards>
+</firmware>

@@ -72,4 +72,30 @@ void __no_inline_not_in_flash_func(psram_init)(uint cs_pin) {
 
     hw_set_bits(&xip_ctrl_hw->ctrl, XIP_CTRL_WRITABLE_M1_BITS);
 }
+/* Put the PSRAM back into its power-on SPI mode. The chip keeps QPI mode
+ * across a chip reset that does not cycle its power, and a QPI-mode PSRAM
+ * sharing the QSPI bus garbles the boot ROM's flash probe: the RP2350 then
+ * hangs in the ROM until a power cycle. Call this (with the other core
+ * stopped) before every software reboot. Runs from RAM: XIP is unusable
+ * while the QMI is in direct mode. */
+void __no_inline_not_in_flash_func(psram_reset_to_spi)(void) {
+    qmi_hw->direct_csr = 30 << QMI_DIRECT_CSR_CLKDIV_LSB | QMI_DIRECT_CSR_EN_BITS;
+    while (qmi_hw->direct_csr & QMI_DIRECT_CSR_BUSY_BITS);
+    /* exit QPI: 0xF5 sent on all four lines */
+    hw_set_bits(&qmi_hw->direct_csr, QMI_DIRECT_CSR_ASSERT_CS1N_BITS);
+    qmi_hw->direct_tx = QMI_DIRECT_TX_NOPUSH_BITS | QMI_DIRECT_TX_IWIDTH_VALUE_Q << QMI_DIRECT_TX_IWIDTH_LSB | 0xF5;
+    while (qmi_hw->direct_csr & QMI_DIRECT_CSR_BUSY_BITS);
+    hw_clear_bits(&qmi_hw->direct_csr, QMI_DIRECT_CSR_ASSERT_CS1N_BITS);
+    /* reset enable + reset, single line */
+    static const uint8_t cmds[2] = {0x66, 0x99};
+    for (int i = 0; i < 2; i++) {
+        hw_set_bits(&qmi_hw->direct_csr, QMI_DIRECT_CSR_ASSERT_CS1N_BITS);
+        qmi_hw->direct_tx = QMI_DIRECT_TX_NOPUSH_BITS | cmds[i];
+        while (qmi_hw->direct_csr & QMI_DIRECT_CSR_BUSY_BITS);
+        hw_clear_bits(&qmi_hw->direct_csr, QMI_DIRECT_CSR_ASSERT_CS1N_BITS);
+    }
+    for (volatile int i = 0; i < 1000; i++);
+    qmi_hw->direct_csr = 0;
+}
+
 #endif

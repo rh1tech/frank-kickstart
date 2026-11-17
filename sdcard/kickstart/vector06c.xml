@@ -1,0 +1,9 @@
+<firmware>
+  <title>Vector-06C</title>
+  <version>0.7.6</version>
+  <author>DnCraptor; Emu80 by V. Pykhonin</author>
+  <website>https://github.com/DnCraptor/emu80v4</website>
+  <description>The Soviet Vector-06C on Emu80, with its 8080 CPU, 256-colour palette and AY sound. Loads ROM, FDD and tape images.</description>
+  <controls>PS/2 or USB keyboard. Alt: menu, Esc: back, Ctrl+Alt+Del: reset.</controls>
+  <boards>m1 m2 z0</boards>
+</firmware>

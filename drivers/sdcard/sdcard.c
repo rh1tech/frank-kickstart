@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include "sdcard.h"
 
 #include "pico.h"
@@ -5,7 +6,6 @@
 #include "hardware/clocks.h"
 #ifndef SDCARD_PIO
 #include "hardware/spi.h"
-#include "hardware/dma.h"
 #else
 #include "pio_spi.h"
 #endif
@@ -52,7 +52,10 @@
 #define CT_BLOCK       0x08            /* Block addressing */
 
 #define CLK_SLOW	(100 * KHZ)
-#define CLK_FAST	(30 * MHZ)
+#ifndef SDCARD_CLK_FAST_MHZ
+#define SDCARD_CLK_FAST_MHZ 30
+#endif
+#define CLK_FAST	(SDCARD_CLK_FAST_MHZ * MHZ)
 
 static volatile
 DSTATUS Stat = STA_NOINIT;	/* Physical drive status */
@@ -98,7 +101,12 @@ static void FCLK_SLOW(void)
 static void FCLK_FAST(void)
 {
 #ifndef SDCARD_PIO
-    spi_set_baudrate(SDCARD_SPI_BUS, CLK_FAST);
+    uint baud = spi_set_baudrate(SDCARD_SPI_BUS, CLK_FAST);
+    static uint said;
+    if (said != baud) {
+        said = baud;
+        printf("SD: SPI at %u kHz\n", baud / 1000);
+    }
 #endif
 }
 
@@ -194,47 +202,6 @@ BYTE xchg_spi (
 }
 
 
-/* DMA-based SPI bulk receive — doesn't monopolize APB bus from CPU */
-#ifndef SDCARD_PIO
-static int spi_dma_tx = -1;
-static int spi_dma_rx = -1;
-static uint8_t spi_dummy_byte = 0xFF;
-
-static void spi_dma_init_once(void) {
-	if (spi_dma_tx >= 0) return;
-	spi_dma_tx = dma_claim_unused_channel(true);
-	spi_dma_rx = dma_claim_unused_channel(true);
-}
-
-static void spi_dma_read(spi_inst_t *spi, uint8_t *dst, size_t len) {
-	spi_dma_init_once();
-
-	// TX channel: send 0xFF repeatedly (no increment, paced by SPI TX DREQ)
-	dma_channel_config tx_cfg = dma_channel_get_default_config(spi_dma_tx);
-	channel_config_set_transfer_data_size(&tx_cfg, DMA_SIZE_8);
-	channel_config_set_read_increment(&tx_cfg, false);
-	channel_config_set_write_increment(&tx_cfg, false);
-	channel_config_set_dreq(&tx_cfg, spi_get_dreq(spi, true));
-	dma_channel_configure(spi_dma_tx, &tx_cfg, &spi_get_hw(spi)->dr, &spi_dummy_byte, len, false);
-
-	// RX channel: read into buffer (increment, paced by SPI RX DREQ)
-	dma_channel_config rx_cfg = dma_channel_get_default_config(spi_dma_rx);
-	channel_config_set_transfer_data_size(&rx_cfg, DMA_SIZE_8);
-	channel_config_set_read_increment(&rx_cfg, false);
-	channel_config_set_write_increment(&rx_cfg, true);
-	channel_config_set_dreq(&rx_cfg, spi_get_dreq(spi, false));
-	dma_channel_configure(spi_dma_rx, &rx_cfg, dst, &spi_get_hw(spi)->dr, len, false);
-
-	// Start both channels simultaneously
-	dma_start_channel_mask((1u << spi_dma_tx) | (1u << spi_dma_rx));
-	dma_channel_wait_for_finish_blocking(spi_dma_rx);
-
-	// Clean up: abort TX in case it's still going, drain SPI RX FIFO
-	dma_channel_abort(spi_dma_tx);
-	while (spi_is_readable(spi)) (void)spi_get_hw(spi)->dr;
-}
-#endif
-
 /* Receive multiple byte */
 static
 void rcvr_spi_multi (
@@ -244,7 +211,7 @@ void rcvr_spi_multi (
 {
 	uint8_t *b = (uint8_t *) buff;
 #ifndef SDCARD_PIO
-	spi_dma_read(SDCARD_SPI_BUS, b, btr);
+	spi_read_blocking(SDCARD_SPI_BUS, 0xff, b, btr);
 #else
 	pio_spi_repeat8_read8_blocking(&pio_spi, 0xff, b, btr);
 #endif
@@ -307,6 +274,24 @@ int _select (void)	/* 1:OK, 0:Timeout */
 /* Receive a data packet from the MMC                                    */
 /*-----------------------------------------------------------------------*/
 
+/* CRC-16/XMODEM (poly 0x1021, init 0): the SD data-block CRC. The original
+ * driver discarded it; on a marginal link that hands corrupted sectors to
+ * the filesystem silently (frank-castle). */
+static uint16_t crc16_table[256];
+static void crc16_init(void) {
+	for (int i = 0; i < 256; i++) {
+		uint16_t c = (uint16_t)(i << 8);
+		for (int b = 0; b < 8; b++) c = (c & 0x8000) ? (uint16_t)((c << 1) ^ 0x1021) : (uint16_t)(c << 1);
+		crc16_table[i] = c;
+	}
+}
+static uint16_t crc16(const BYTE *p, UINT n) {
+	uint16_t c = 0;
+	while (n--) c = (uint16_t)((c << 8) ^ crc16_table[((c >> 8) ^ *p++) & 0xFF]);
+	return c;
+}
+volatile uint32_t sd_crc_errors, sd_token_errors, sd_retries;
+
 static
 int rcvr_datablock (	/* 1:OK, 0:Error */
 	BYTE *buff,			/* Data buffer */
@@ -321,11 +306,19 @@ int rcvr_datablock (	/* 1:OK, 0:Error */
 		token = xchg_spi(0xFF);
 		/* This loop will take a time. Insert rot_rdq() here for multitask envilonment. */
 	} while (token == 0xFF && _millis() < t + timeout);
-	if(token != 0xFE) return 0;		/* Function fails if invalid DataStart token or timeout */
+	if(token != 0xFE) {		/* invalid DataStart token or timeout */
+		sd_token_errors++;
+		return 0;
+	}
 
 	rcvr_spi_multi(buff, btr);		/* Store trailing data to the buffer */
-	xchg_spi(0xFF); xchg_spi(0xFF);			/* Discard CRC */
-
+	uint16_t crc = (uint16_t)(xchg_spi(0xFF) << 8);
+	crc |= xchg_spi(0xFF);
+	if (!crc16_table[1]) crc16_init();
+	if (crc16(buff, btr) != crc) {
+		sd_crc_errors++;
+		return 0;
+	}
 	return 1;						/* Function succeeded */
 }
 
@@ -463,6 +456,11 @@ DSTATUS disk_status (
 /* Read sector(s)                                                        */
 /*-----------------------------------------------------------------------*/
 
+static DRESULT disk_read_once (BYTE *buff, LBA_t sector, UINT count);
+
+/* Retry reads: a failed or CRC-mismatched block is read again, and after
+ * repeated failures the card is re-initialised (frank-castle). */
+volatile uint32_t sd_frame_reads; /* sectors read this frame (reset at VSync) */
 DRESULT disk_read (
 	BYTE drv,		/* Physical drive number (0) */
 	BYTE *buff,		/* Pointer to the data buffer to store read data */
@@ -471,8 +469,25 @@ DRESULT disk_read (
 )
 {
 	if (drv || !count) return RES_PARERR;		/* Check parameter */
-	if (Stat & STA_NOINIT) return RES_NOTRDY;	/* Check if drive is ready */
+	sd_frame_reads += count;
+	for (int attempt = 0; attempt < 5; attempt++) {
+		if (Stat & STA_NOINIT) disk_initialize(0);
+		if (Stat & STA_NOINIT) {
+			printf("sd: card init failed, retry %d\n", attempt + 1);
+			sleep_ms(20 << attempt);
+			continue;
+		}
+		if (disk_read_once(buff, sector, count) == RES_OK) return RES_OK;
+		sd_retries++;
+		printf("sd: read %lu+%u failed (crc %lu, token %lu), retry %d\n", (unsigned long)sector, count,
+		       (unsigned long)sd_crc_errors, (unsigned long)sd_token_errors, attempt + 1);
+		if (attempt >= 1) Stat |= STA_NOINIT; /* re-initialise before the next try */
+	}
+	return RES_ERROR;
+}
 
+static DRESULT disk_read_once (BYTE *buff, LBA_t sector, UINT count)
+{
 	if (!(CardType & CT_BLOCK)) sector *= 512;	/* LBA ot BA conversion (byte addressing cards) */
 
 	if (count == 1) {	/* Single sector read */

@@ -1,0 +1,9 @@
+<firmware>
+  <title>Gamate</title>
+  <version>3.1.2</version>
+  <author>DnCraptor, xrip</author>
+  <website>https://github.com/DnCraptor/pico-gamate</website>
+  <description>The Bit Corporation Gamate, a 1990 handheld. Loads cartridges from the SD card, with saved settings and input recording.</description>
+  <controls>Keyboard or NES pad. Enter: Start, F10: cartridge browser.</controls>
+  <boards>m1 m2 z0</boards>
+</firmware>

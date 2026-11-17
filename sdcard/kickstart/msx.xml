@@ -1,0 +1,9 @@
+<firmware>
+  <title>MSX</title>
+  <version>0.01</version>
+  <author>Mikhail Matveev; fMSX</author>
+  <website>https://github.com/rh1tech/frank-msx</website>
+  <description>An MSX, MSX2 and MSX2+ on fMSX, with SCC+ and FM sound and save states. Loads cartridges, disks and tapes.</description>
+  <controls>PS/2 or USB keyboard and mouse, NES/SNES/USB pad. F11: loader, F12: settings.</controls>
+  <boards>m1 m2 z0</boards>
+</firmware>

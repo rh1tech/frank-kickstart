@@ -1,0 +1,9 @@
+<firmware>
+  <title>SMS / Game Gear</title>
+  <version>2.1.3</version>
+  <author>xrip, DnCraptor; SMS Plus core</author>
+  <website>https://github.com/DnCraptor/pico-sms</website>
+  <description>The Sega Master System and Game Gear on SMS Plus. Loads SMS and GG cartridges from the SD card.</description>
+  <controls>PS/2 keyboard or NES pad. Start+Select: menu.</controls>
+  <boards>m1 m2</boards>
+</firmware>

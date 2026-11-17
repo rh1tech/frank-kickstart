@@ -1,0 +1,9 @@
+<firmware>
+  <title>Korvet PK8020</title>
+  <version>0.7.1</version>
+  <author>DnCraptor; Emu80 by V. Pykhonin</author>
+  <website>https://github.com/DnCraptor/emu80v4</website>
+  <description>The Soviet Korvet PK8020 school computer on Emu80. Boots CP/M from disk images on the SD card.</description>
+  <controls>PS/2 or USB keyboard. Alt: menu, Esc: back, Ctrl+Alt+Del: reset.</controls>
+  <boards>m1 m2 z0</boards>
+</firmware>

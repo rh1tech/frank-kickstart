@@ -1,0 +1,9 @@
+<firmware>
+  <title>pico-speccy</title>
+  <version>1.1.1</version>
+  <author>drewpo28, DnCraptor</author>
+  <website>https://github.com/drewpo28/pico-speccy</website>
+  <description>An extended ZX Spectrum on ESPectrum: 48K to +3, Pentagon, Profi and more, with AY, TurboSound, MIDI and Betadisk.</description>
+  <controls>PS/2 or USB keyboard and mouse, NES/USB pad as Kempston. F1: menu, F2-F12: shortcuts.</controls>
+  <boards>m1 m2 z0</boards>
+</firmware>

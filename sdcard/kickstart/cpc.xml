@@ -1,0 +1,9 @@
+<firmware>
+  <title>Amstrad CPC</title>
+  <version>1.00</version>
+  <author>Mikhail Matveev; Caprice32</author>
+  <website>https://github.com/rh1tech/frank-cpc</website>
+  <description>An Amstrad CPC 464, 664 and 6128 on Caprice32 with AY sound. Loads DSK and IPF disks, CDT tapes and CPR cartridges.</description>
+  <controls>PS/2 or USB keyboard, NES/SNES/USB pad. F11: loader, F12 or Select+Start: settings.</controls>
+  <boards>m1 m2 z0</boards>
+</firmware>

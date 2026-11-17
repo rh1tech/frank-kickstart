@@ -1,0 +1,9 @@
+<firmware>
+  <title>Wolfenstein 3D</title>
+  <version>1.01</version>
+  <author>Mikhail Matveev; Wolf4SDL</author>
+  <website>https://github.com/rh1tech/frank-wolf3d</website>
+  <description>Wolfenstein 3D on Wolf4SDL, with OPL2 music and digitised sound. Plays the full or shareware data from the SD card.</description>
+  <controls>PS/2 or USB keyboard and mouse, NES pad: arrows, Ctrl: fire, Space: open, Alt: strafe.</controls>
+  <boards>m1 m2</boards>
+</firmware>

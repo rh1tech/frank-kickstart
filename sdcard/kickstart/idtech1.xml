@@ -1,0 +1,9 @@
+<firmware>
+  <title>DOOM, Heretic, Hexen, Strife</title>
+  <version>1.01</version>
+  <author>Mikhail Matveev; Chocolate Doom</author>
+  <website>https://github.com/rh1tech/frank-idtech1</website>
+  <description>Doom, Doom II, Heretic, Hexen and Strife: the engine follows the WAD you pick.</description>
+  <controls>PS/2 or USB keyboard and mouse, USB or NES/SNES pad. F12: settings.</controls>
+  <boards>m1 m2 z0</boards>
+</firmware>

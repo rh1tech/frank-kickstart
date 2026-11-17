@@ -1,0 +1,9 @@
+<firmware>
+  <title>Quake II</title>
+  <version>1.04</version>
+  <author>Mikhail Matveev; id Software</author>
+  <website>https://github.com/rh1tech/frank-quake2</website>
+  <description>id Software's 1997 shooter at 320x240, HDMI or I2S sound, 504 MHz. Needs the retail pak0-pak2 (3.20) in /quake2/baseq2.</description>
+  <controls>USB keyboard and mouse: arrows move, Ctrl fire, Space jump, Esc menu.</controls>
+  <boards>m2 z0</boards>
+</firmware>

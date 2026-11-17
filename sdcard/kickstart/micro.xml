@@ -1,0 +1,9 @@
+<firmware>
+  <title>BBC Micro</title>
+  <version>1.00</version>
+  <author>Mikhail Matveev; B-em</author>
+  <website>https://github.com/rh1tech/frank-micro</website>
+  <description>A BBC Micro Model B and Master 128 on B-em, with the OS, BASIC and DFS ROMs built in. Disc images stream from the SD card.</description>
+  <controls>PS/2 or USB keyboard, NES/SNES/USB pad. F11: discs, F12: settings, Ctrl+Alt+Del: reset.</controls>
+  <boards>m1 m2 z0</boards>
+</firmware>

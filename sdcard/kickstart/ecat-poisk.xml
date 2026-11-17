@@ -1,0 +1,9 @@
+<firmware>
+  <title>Poisk (eCat)</title>
+  <version>1.00</version>
+  <author>Mikhail Matveev, Mikhail Revzin</author>
+  <website>https://github.com/rh1tech/frank-ecat</website>
+  <description>The Poisk-1, a Soviet IBM PC/XT relative, with its cartridge RAM and floppy drive. Emulated by eCat3; ROMs are built in.</description>
+  <controls>USB keyboard. F11: file browser, F12: settings; a key at power-on picks the model.</controls>
+  <boards>m2</boards>
+</firmware>

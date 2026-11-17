@@ -1,0 +1,9 @@
+<firmware>
+  <title>Warcraft II (PSX)</title>
+  <version>1.00</version>
+  <author>Mikhail Matveev</author>
+  <website>https://github.com/rh1tech/frank-war2</website>
+  <description>Warcraft II: The Dark Saga as the 1997 PlayStation game, from your own disc's files in /war2/disc. HDMI or I2S sound, PSRAM.</description>
+  <controls>Mouse and keyboard: left select, right cancel, Space commands, F10 pause, F12 settings.</controls>
+  <boards>m2</boards>
+</firmware>
