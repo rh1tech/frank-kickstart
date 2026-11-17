@@ -110,10 +110,12 @@ void video_set_frame_hook(void (*hook)(void)) {
     frame_hook = hook;
 }
 
+/* The hook (the music's SD reads) runs first, in what is left of the frame,
+ * so the caller still gets the whole vblank for its drawing. */
 void video_wait_vblank(void) {
+    if (frame_hook) frame_hook();
     uint32_t n = vsync_count;
     while (vsync_count == n) tight_loop_contents();
-    if (frame_hook) frame_hook();
 }
 
 bool video_set_audio_source(video_audio_source_t source) {

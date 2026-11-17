@@ -58,18 +58,32 @@ static int read_last(void) {
     return cat_find(name);
 }
 
-/* /kickstart/.config: "music=0" when the music was switched off. */
-static bool config_music(void) {
+/* /kickstart/.config:
+ *   music=0  the music was switched off (M)
+ *   menu=1   the start countdown was cut short: the next start goes to the
+ *            menu, until a firmware is launched from it */
+static bool cfg_music = true, cfg_menu;
+
+static void config_load(void) {
     char s[64];
     int n = fsio_read(CONFIG_FILE, 0, s, sizeof s - 1);
-    if (n <= 0) return true;
+    if (n <= 0) return;
     s[n] = 0;
-    return !strstr(s, "music=0");
+    cfg_music = !strstr(s, "music=0");
+    cfg_menu = strstr(s, "menu=1") != NULL;
 }
 
 static void config_save(void) {
-    const char *s = music_is_on() ? "music=1\n" : "music=0\n";
-    fsio_write(CONFIG_FILE, s, (int)strlen(s));
+    char s[32];
+    int n = snprintf(s, sizeof s, "music=%d\nmenu=%d\n", cfg_music, cfg_menu);
+    fsio_write(CONFIG_FILE, s, n);
+}
+
+/* A firmware launched from the menu: the countdown is back on resets. */
+static void config_launched(void) {
+    if (!cfg_menu) return;
+    cfg_menu = false;
+    config_save();
 }
 
 /* Shows the message and keeps polling (the UART still takes ~BOOT~). */
@@ -87,6 +101,7 @@ static void launch(int sel) {
     if (sel == ui_installed) {
         printf("Starting %s (already in the flash)\n", e->filename);
         music_stop();
+        config_launched();
         ui_flash_begin(sel, true);
         sleep_ms(300);
         flash_boot_into();
@@ -102,6 +117,7 @@ static void launch(int sel) {
     }
     printf("Installed in %lld ms\n", absolute_time_diff_us(t0, get_absolute_time()) / 1000);
     fsio_write(LAST_FILE, path, (int)strlen(path));
+    config_launched();
     fsio_unmount();
     sleep_ms(200);
     flash_boot_into();
@@ -160,6 +176,7 @@ int main(void) {
     boot_stage(6);
 
     bool sd_ok = fsio_mount();
+    if (sd_ok) config_load();
     boot_stage(7);
     int sel = 0;
     /* a firmware in the flash: ZERO_BLOCK holds its sector 0 (flashing the
@@ -180,7 +197,7 @@ int main(void) {
     }
     boot_stage(8);
 
-    if (installed && !boot_ui_requested) {
+    if (installed && !boot_ui_requested && !cfg_menu) {
         /* a reset or power-on with a firmware in the flash: it starts after
          * the countdown, unless a key asks for the menu */
         printf("Starting %s in %d s (any key: menu)\n", ui_installed >= 0 ? cat[ui_installed].filename : "the firmware",
@@ -190,10 +207,14 @@ int main(void) {
             if (sd_ok) fsio_unmount();
             flash_boot_into();
         }
-        if (sd_ok) music_start(MUSIC_FILE, config_music());
+        if (sd_ok) {
+            cfg_menu = true;
+            config_save();
+            music_start(MUSIC_FILE, cfg_music);
+        }
     } else {
         /* background music, where the video carries sound (M2) */
-        if (sd_ok) music_start(MUSIC_FILE, config_music());
+        if (sd_ok) music_start(MUSIC_FILE, cfg_music);
         ui_welcome();
     }
 
@@ -242,6 +263,7 @@ int main(void) {
         }
         if ((pressed & IN_MUSIC) && music_available()) {
             music_set_on(!music_is_on());
+            cfg_music = music_is_on();
             ui_browser_footer(sel, confirm);
             config_save();
             printf("Music %s\n", music_is_on() ? "on" : "off");

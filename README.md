@@ -47,8 +47,9 @@ A firmware must not write flash at or above `0x10FBF000`; see [docs/FIRMWARE.md]
 1. On power-up, `before_main()` runs before `main()`
 2. If watchdog scratch[0] contains `SCRATCH_MAGIC_BOOT` (set by the launcher just before it reboots) -- jump to the flashed firmware
 3. Otherwise (power-on, reset, or `SCRATCH_MAGIC_UI` 0x17F00FFF from a firmware) -- run the launcher
+4. With a firmware in the flash, after a power-on or reset, the launcher shows "Loading <name>" with a 4-second countdown and then starts it; any key opens the menu instead. A firmware that asks for the launcher (`SCRATCH_MAGIC_UI`) gets the menu at once.
 
-So a power cycle or reset always returns to the launcher. Choosing the firmware that is already in the flash starts it at once, without writing anything.
+Once the countdown has been cut short, later starts go straight to the menu (`menu=1` in `kickstart/.config`) until a firmware is launched from it again. Choosing the firmware that is already in the flash starts it at once, without writing anything.
 
 ## Pin Assignment
 

@@ -452,14 +452,23 @@ static void present(bool skip_cover) {
     }
 }
 
-/* The cover area redrawn with the cover at x offset dx. */
+/* The next frame of the cover area, the cover at x offset dx: drawn
+ * off-screen (the back layer is free once presented), then copied in at
+ * the vblank, top down and ahead of the beam (drawn on screen, the beam
+ * caught the area empty: the cover flickered). */
 static void cover_frame(int sel, int dx) {
+    const int w = AREA_X1 - AREA_X0;
     for (int y = AREA_Y0; y < AREA_Y1; y++)
-        memcpy(video_fb + y * GFX_W + AREA_X0, layer_bg + y * GFX_W + AREA_X0, AREA_X1 - AREA_X0);
+        memcpy(layer_back + y * GFX_W + AREA_X0, layer_bg + y * GFX_W + AREA_X0, w);
+    gfx_target(layer_back);
     gfx_clip(AREA_X0, AREA_Y0, AREA_X1, AREA_Y1);
     draw_shadow_at(sel, COVER_X + dx, COVER_Y);
     draw_cover_at(sel, COVER_X + dx, COVER_Y);
     gfx_noclip();
+    gfx_target(NULL);
+    video_wait_vblank();
+    for (int y = AREA_Y0; y < AREA_Y1; y++)
+        memcpy(video_fb + y * GFX_W + AREA_X0, layer_back + y * GFX_W + AREA_X0, w);
 }
 
 void ui_init(void) {
@@ -518,7 +527,6 @@ void ui_browser_move(int to, int dir) {
     int from = shown;
     /* out: text and cover fade, the cover slides away */
     for (int f = 1; f <= N; f++) {
-        video_wait_vblank();
         cover_frame(from, -dir * ease(f, N, SLIDE_PX));
         show_faded(256 - f * 256 / N, 256);
     }
@@ -530,7 +538,6 @@ void ui_browser_move(int to, int dir) {
     show_faded(0, 256);
     /* in: from the other side */
     for (int f = 1; f <= N; f++) {
-        video_wait_vblank();
         cover_frame(to, dir * (SLIDE_PX - ease(f, N, SLIDE_PX)));
         show_faded(f * 256 / N, 256);
     }
